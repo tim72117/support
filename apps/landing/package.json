@@ -1,0 +1,15 @@
+{
+  "name": "@ai-support/landing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Marketing landing page for ai-support — targets prospective business owners (the console's sign-up audience), not end consumers. Every page is a self-contained static HTML file; Vite just serves/builds them, no framework.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.0.2"
+  }
+}

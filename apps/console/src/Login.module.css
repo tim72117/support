@@ -1,0 +1,100 @@
+.page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background:
+    radial-gradient(circle at 15% 20%, var(--accent-purple-wash) 0%, transparent 45%),
+    radial-gradient(circle at 85% 80%, var(--accent-teal-wash) 0%, transparent 45%),
+    var(--bg);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-8) var(--space-6) var(--space-6);
+  text-align: center;
+}
+
+.brandRow {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-4);
+}
+
+.title {
+  font-size: 22px;
+  color: var(--ink);
+  margin-bottom: var(--space-2);
+}
+
+.subtitle {
+  display: block;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: var(--space-6);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: left;
+}
+
+.label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  margin-bottom: var(--space-1);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input:focus {
+  border-color: var(--brand);
+}
+
+.submit {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: none;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.submit:hover {
+  background: var(--brand-strong);
+}
+
+.submit:active {
+  transform: scale(0.98);
+}
+
+.hint {
+  display: block;
+  margin-top: var(--space-4);
+  font-size: 12px;
+  color: var(--ink-faint);
+}

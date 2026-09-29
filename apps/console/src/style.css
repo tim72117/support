@@ -1,0 +1,97 @@
+/* ---------------------------------------------------------------------- */
+/* Tokens — clean, bright, a little playful. Shared by console + support   */
+/* is not a goal (two separate apps), but the palette family is the same   */
+/* spirit described in docs/refactor-initial-scaffold-plan: 清新明亮、可帶卡通感 */
+/* ---------------------------------------------------------------------- */
+
+:root {
+  --font-display: 'Baloo 2', 'Noto Sans TC', system-ui, sans-serif;
+  --font-body: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  --bg: #fbfaf7;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f3f1ec;
+  --ink: #2c2a28;
+  --ink-dim: #6f6b66;
+  --ink-faint: #a8a39c;
+  --border: #ebe6dd;
+  --border-strong: #ddd6c8;
+
+  --brand: #ff8a5b;
+  --brand-ink: #ffffff;
+  --brand-wash: #fff1e8;
+  --brand-strong: #f2703a;
+
+  --accent-teal: #4ecdc4;
+  --accent-teal-wash: #e6f9f7;
+  --accent-purple: #8e7dff;
+  --accent-purple-wash: #efecff;
+
+  --success: #2f9e6b;
+  --success-wash: #e5f6ee;
+  --danger: #e0563f;
+  --danger-wash: #fdeae6;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --shadow-card: 0 2px 6px rgba(44, 42, 40, 0.05), 0 8px 24px rgba(44, 42, 40, 0.06);
+  --shadow-pop: 0 12px 32px rgba(44, 42, 40, 0.14);
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}

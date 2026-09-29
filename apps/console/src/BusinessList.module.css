@@ -1,0 +1,256 @@
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.heading {
+  font-size: 26px;
+  margin-bottom: var(--space-1);
+}
+
+.subheading {
+  display: block;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.newButton {
+  border: none;
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-radius: var(--radius-pill);
+  padding: var(--space-3) var(--space-5);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.newButton:hover {
+  background: var(--brand-strong);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-5);
+}
+
+.card {
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mascotWrap {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cardName {
+  font-size: 17px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.cardSlug {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.cardTagline {
+  font-size: 13px;
+  color: var(--ink-dim);
+  line-height: 1.5;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: auto;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.statusDotOn {
+  background: var(--success);
+}
+
+.statusDotOff {
+  background: var(--ink-faint);
+}
+
+.statusLabel {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.emptyState {
+  background: var(--bg-raised);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10);
+  text-align: center;
+  color: var(--ink-dim);
+}
+
+/* --- new business modal --- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(44, 42, 40, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 10;
+}
+
+.modal {
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow-pop);
+}
+
+.modalTitle {
+  font-size: 20px;
+  margin-bottom: var(--space-4);
+}
+
+.field {
+  margin-bottom: var(--space-4);
+}
+
+.label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  margin-bottom: var(--space-1);
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg);
+  font-size: 15px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--brand);
+}
+
+.mascotPicker {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mascotOption {
+  border: 2px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mascotOptionSelected {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+}
+
+.colorPicker {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.colorOption {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.colorOptionSelected {
+  border-color: var(--ink);
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.cancelButton {
+  border: none;
+  background: transparent;
+  color: var(--ink-dim);
+  padding: var(--space-3) var(--space-4);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.confirmButton {
+  border: none;
+  background: var(--brand);
+  color: var(--brand-ink);
+  border-radius: var(--radius-pill);
+  padding: var(--space-3) var(--space-5);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.confirmButton:disabled {
+  background: var(--border-strong);
+  cursor: not-allowed;
+}

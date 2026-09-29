@@ -1,0 +1,85 @@
+.shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.backButton {
+  border: none;
+  background: var(--bg-sunken);
+  color: var(--ink-dim);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.backButton:hover {
+  background: var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.brandDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.ownerName {
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+
+.logout {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--ink-dim);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.logout:hover {
+  background: var(--bg-sunken);
+}
+
+.main {
+  flex: 1;
+  padding: var(--space-8) var(--space-6);
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+}

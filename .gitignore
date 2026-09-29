@@ -1,0 +1,17 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# Go
+/backend/server
+/backend/*.exe
+
+# Env
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+*.swp
