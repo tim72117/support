@@ -14,21 +14,26 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/tim72117/ai-support/internal/business"
+	"github.com/tim72117/ai-support/internal/quota"
 	"github.com/tim72117/ai-support/internal/session"
 )
 
 type Handler struct {
 	Businesses *business.Store
 	Session    *session.Store
-	log        *slog.Logger
+	// Quota may be nil (QUOTA_ENABLED=false); GET /console/quota then
+	// reports enabled=false instead of failing.
+	Quota *quota.Service
+	log   *slog.Logger
 }
 
-func NewHandler(businesses *business.Store, sessionStore *session.Store, log *slog.Logger) *Handler {
-	return &Handler{Businesses: businesses, Session: sessionStore, log: log}
+func NewHandler(businesses *business.Store, sessionStore *session.Store, quotaSvc *quota.Service, log *slog.Logger) *Handler {
+	return &Handler{Businesses: businesses, Session: sessionStore, Quota: quotaSvc, log: log}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -36,6 +41,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/login", h.login)
 	mux.HandleFunc("POST /auth/logout", h.logout)
 	mux.HandleFunc("GET /auth/me", h.withAuth(h.me))
+
+	mux.HandleFunc("GET /console/quota", h.withAuth(h.getQuota))
 
 	mux.HandleFunc("GET /console/businesses", h.withAuth(h.listBusinesses))
 	mux.HandleFunc("POST /console/businesses", h.withAuth(h.createBusiness))
@@ -94,6 +101,48 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request, user *session.User) {
 	writeJSON(w, user)
+}
+
+// quotaResponse is the caller's own plan + usage-this-period standing.
+// Limit/Used are deliberately NOT omitempty: 0 is a real value there.
+type quotaResponse struct {
+	Enabled     bool      `json:"enabled"`
+	Tier        string    `json:"tier,omitempty"`
+	PlanName    string    `json:"planName,omitempty"`
+	Limit       int       `json:"limit"`
+	Used        int       `json:"used"`
+	UsedPercent int       `json:"usedPercent"`
+	PeriodStart time.Time `json:"periodStart,omitempty"`
+	PeriodEnd   time.Time `json:"periodEnd,omitempty"`
+}
+
+// getQuota reports the calling owner's plan and current-period usage, across
+// every business they own. A nil h.Quota is a normal 200 with enabled=false.
+func (h *Handler) getQuota(w http.ResponseWriter, r *http.Request, user *session.User) {
+	if h.Quota == nil {
+		writeJSON(w, quotaResponse{Enabled: false})
+		return
+	}
+	st, err := h.Quota.StandingFor(r.Context(), user.ID)
+	if err != nil {
+		h.log.Error("quota standing", "err", err)
+		http.Error(w, "failed to load quota", http.StatusInternalServerError)
+		return
+	}
+	var usedPercent int
+	if st.Limit > 0 {
+		usedPercent = (st.Used*100 + st.Limit/2) / st.Limit
+	}
+	writeJSON(w, quotaResponse{
+		Enabled:     true,
+		Tier:        string(st.Tier),
+		PlanName:    st.PlanName,
+		Limit:       st.Limit,
+		Used:        st.Used,
+		UsedPercent: usedPercent,
+		PeriodStart: st.PeriodStart,
+		PeriodEnd:   st.PeriodEnd,
+	})
 }
 
 func (h *Handler) listBusinesses(w http.ResponseWriter, r *http.Request, user *session.User) {

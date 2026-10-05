@@ -62,3 +62,91 @@ CREATE TABLE IF NOT EXISTS business_content (
     content     TEXT NOT NULL DEFAULT '',
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------
+-- 訂閱方案與用量（由 onagent 的 internal/quota 移植而來，之後會抽成共用套件）
+-- 這裡的用量由 ai-support 自己計算，與 onagent 的額度無關。
+-- ---------------------------------------------------------------------
+
+-- 每個業主一列，註冊時建立（session.Register）。額度「不」存在這裡，而是
+-- 由 tier 對應的方案在查詢時推算（internal/quota.PlanFor），改方案數字時
+-- 不需要 migration。monthly_quota 是可選的個人覆寫（NULL = 用方案值）。
+-- 計費週期由 started_at 推算，不靠排程重置。
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id       BIGINT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    tier          TEXT NOT NULL DEFAULT 'free', -- 自由文字、非 enum，新增方案不需要 migration
+    monthly_quota INTEGER,
+    started_at    TIMESTAMPTZ NOT NULL DEFAULT now(), -- 計費週期的錨點
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 只新增不修改的用量帳本；當期用量永遠是對這張表 SUM 出來的，不是計數器。
+-- 計費對象是 owner_id 而非 business_id：帳本必須比它所計費的對象活得更久，
+-- 否則刪除再重建 business 就能把當月額度歸零。
+CREATE TABLE IF NOT EXISTS usage_events (
+    id                BIGSERIAL PRIMARY KEY,
+    business_id       BIGINT REFERENCES businesses (id) ON DELETE SET NULL, -- business 刪除後保留帳本，僅此欄變 NULL
+    owner_id          BIGINT REFERENCES users (id) ON DELETE CASCADE,
+    event_id          TEXT NOT NULL,  -- 僅供稽核，不是去重鍵
+    kind              TEXT NOT NULL DEFAULT 'prompt',
+    prompt_tokens     INT,
+    completion_tokens INT,
+    total_tokens      INT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 每個強制檢查點都用這兩個欄位查「這個業主自某時間起用了多少」。
+CREATE INDEX IF NOT EXISTS usage_events_owner_id_created_at_idx
+    ON usage_events (owner_id, created_at);
+CREATE INDEX IF NOT EXISTS usage_events_business_id_created_at_idx
+    ON usage_events (business_id, created_at);
+
+-- ---------------------------------------------------------------------
+-- 金流（TapPay）。與 quota 的 subscriptions（方案/額度）刻意分開：
+-- subscriptions 只說「這個業主現在是什麼方案」，這裡記「怎麼收錢」。
+-- 卡號完全不經過、也不存在這個後端；只保存 TapPay 回傳的 card_key /
+-- card_token（續扣用）與卡片末四碼。價格在程式碼 internal/billing/prices.go，
+-- 前端傳來的金額一律不採信。
+-- ---------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS billing_profiles (
+    user_id          BIGINT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    tier             TEXT NOT NULL,                -- 正在付費的方案
+    status           TEXT NOT NULL,                -- active | past_due | canceled | expired
+    card_key         TEXT NOT NULL DEFAULT '',
+    card_token       TEXT NOT NULL DEFAULT '',
+    card_last_four   TEXT NOT NULL DEFAULT '',
+    anchor_at        TIMESTAMPTZ NOT NULL,         -- 首次付款時間；第 N 期結束 = anchor + N 個月
+    periods_paid     INTEGER NOT NULL DEFAULT 0,
+    current_period_end TIMESTAMPTZ NOT NULL,
+    next_charge_at   TIMESTAMPTZ,                  -- NULL = 不再續扣
+    failed_attempts  INTEGER NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS billing_profiles_next_charge_idx
+    ON billing_profiles (next_charge_at) WHERE next_charge_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS payments (
+    id                  BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    kind                TEXT NOT NULL,   -- initial | renewal
+    tier                TEXT NOT NULL,
+    order_number        TEXT NOT NULL,   -- 送給 TapPay 的訂單編號
+    amount              INTEGER NOT NULL,
+    status              TEXT NOT NULL,   -- pending | succeeded | failed
+    rec_trade_id        TEXT NOT NULL DEFAULT '',
+    bank_transaction_id TEXT NOT NULL DEFAULT '',
+    gateway_status      INTEGER,         -- TapPay 回傳的 status，0 = 成功
+    message             TEXT NOT NULL DEFAULT '',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS payments_order_number_idx ON payments (order_number);
+
+-- 同一個業主同一時間只能有一筆「結果未定」的扣款：既擋重複點擊，也讓
+-- 結果不明（逾時）的扣款在人工對帳前不會被再扣一次。
+CREATE UNIQUE INDEX IF NOT EXISTS payments_one_pending_per_user_idx
+    ON payments (user_id) WHERE status = 'pending';

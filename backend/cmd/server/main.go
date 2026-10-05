@@ -8,18 +8,23 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 
+	"github.com/tim72117/ai-support/internal/billing"
 	"github.com/tim72117/ai-support/internal/business"
 	"github.com/tim72117/ai-support/internal/console"
 	"github.com/tim72117/ai-support/internal/db"
 	"github.com/tim72117/ai-support/internal/googleauth"
+	"github.com/tim72117/ai-support/internal/quota"
 	"github.com/tim72117/ai-support/internal/session"
+	"github.com/tim72117/ai-support/internal/tappay"
 )
 
 const usage = `Usage: server [-h|--help]
@@ -40,6 +45,13 @@ Configured entirely via environment variables (optionally loaded from a
   GOOGLE_OAUTH_CLIENT_ID     Optional — enables "Sign in with Google".
   GOOGLE_OAUTH_CLIENT_SECRET
   GOOGLE_OAUTH_REDIRECT_URL
+  TAPPAY_APP_ID              TapPay browser-side credentials (safe to expose;
+  TAPPAY_APP_KEY              used by the page's TPDirect.setupSDK).
+  TAPPAY_PARTNER_KEY         TapPay server-side secret. Never log or send to
+  TAPPAY_MERCHANT_ID          a client. Billing stays off until both are set.
+  TAPPAY_ENV                 "production" for live charges (default: sandbox).
+  QUOTA_ENABLED              "false" to disable the monthly usage quota
+                              (default "true").
   CONSOLE_URL                Where the browser lands after Google sign-in
                               succeeds (default "http://localhost:5175").
 `
@@ -69,7 +81,36 @@ func main() {
 
 	sessionStore := session.New(gormDB, cookieSecure)
 	businessStore := business.New(gormDB)
-	consoleHandler := console.NewHandler(businessStore, sessionStore, log)
+	var quotaSvc *quota.Service
+	if envOr("QUOTA_ENABLED", "true") == "true" {
+		quotaSvc = quota.New(gormDB)
+	} else {
+		log.Info("QUOTA_ENABLED=false: usage quota is not enforced")
+	}
+	consoleHandler := console.NewHandler(businessStore, sessionStore, quotaSvc, log)
+
+	// TapPay billing. Needs the quota service (it moves owners between
+	// tiers) and TapPay credentials; without either, /console/billing/*
+	// still answers but reports billing as disabled.
+	tpCfg := tappay.Config{
+		AppID:      os.Getenv("TAPPAY_APP_ID"),
+		AppKey:     os.Getenv("TAPPAY_APP_KEY"),
+		PartnerKey: os.Getenv("TAPPAY_PARTNER_KEY"),
+		MerchantID: os.Getenv("TAPPAY_MERCHANT_ID"),
+		Production: os.Getenv("TAPPAY_ENV") == "production",
+	}
+	var billingSvc *billing.Service
+	switch {
+	case !tpCfg.Configured():
+		log.Warn("TAPPAY_PARTNER_KEY / TAPPAY_MERCHANT_ID not set; billing is disabled")
+	case quotaSvc == nil:
+		log.Warn("QUOTA_ENABLED=false; billing is disabled (it needs the quota service)")
+	default:
+		billingSvc = billing.New(gormDB, tappay.New(tpCfg), quotaSvc, log)
+		go billingSvc.Run(context.Background(), time.Hour)
+		log.Info("TapPay billing enabled", "env", tpCfg.Env())
+	}
+	billingHandler := billing.NewHandler(billingSvc, sessionStore, tpCfg, log)
 
 	siteOrigins := strings.Split(os.Getenv("ALLOWED_ORIGIN"), ",")
 	if os.Getenv("ALLOWED_ORIGIN") == "" {
@@ -92,7 +133,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mountCredentialedRoutes(mux, consoleHandler, allowlistChecker(siteOrigins), googleAuthHandler)
+	mountCredentialedRoutes(mux, multiRegistrar{consoleHandler, billingHandler}, allowlistChecker(siteOrigins), googleAuthHandler)
 	if googleAuthHandler != nil {
 		// Deliberately NOT behind corsMiddleware, same reasoning as
 		// onagent's own main.go: these are top-level browser navigations
@@ -114,6 +155,15 @@ func main() {
 // (testability with a fake, without depending on a live Postgres).
 type routeRegistrar interface {
 	Register(mux *http.ServeMux)
+}
+
+// multiRegistrar registers several handlers onto the same mux.
+type multiRegistrar []routeRegistrar
+
+func (m multiRegistrar) Register(mux *http.ServeMux) {
+	for _, r := range m {
+		r.Register(mux)
+	}
 }
 
 func mountCredentialedRoutes(mux *http.ServeMux, console routeRegistrar, siteOrigins func(string) bool, googleAuth *googleauth.Handler) {

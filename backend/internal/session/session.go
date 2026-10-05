@@ -19,6 +19,8 @@ import (
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+
+	"github.com/tim72117/ai-support/internal/quota"
 )
 
 // CookieName is the cookie the console API's session id travels in. httpOnly
@@ -75,6 +77,13 @@ type identityRow struct {
 
 func (identityRow) TableName() string { return "identities" }
 
+type subscriptionRow struct {
+	UserID int64  `gorm:"column:user_id;primaryKey"`
+	Tier   string `gorm:"column:tier"`
+}
+
+func (subscriptionRow) TableName() string { return "subscriptions" }
+
 type sessionRow struct {
 	ID        string    `gorm:"column:id;primaryKey"`
 	UserID    int64     `gorm:"column:user_id"`
@@ -114,17 +123,31 @@ func (s *Store) Register(email, password string) (*User, error) {
 		return nil, fmt.Errorf("session: hash password: %w", err)
 	}
 
+	// The user row and its default-tier subscription row are created in one
+	// transaction, so subscriptions stays 1:1 with users (internal/quota
+	// needs the row's started_at as the billing-cycle anchor).
 	hashStr := string(hash)
-	u := userRow{Email: email, PasswordHash: &hashStr}
-	if err := s.db.Create(&u).Error; err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" { // unique_violation
-			return nil, ErrEmailTaken
+	var id int64
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		u := userRow{Email: email, PasswordHash: &hashStr}
+		if err := tx.Create(&u).Error; err != nil {
+			var pqErr *pq.Error
+			if errors.As(err, &pqErr) && pqErr.Code == "23505" { // unique_violation
+				return ErrEmailTaken
+			}
+			return fmt.Errorf("session: insert user: %w", err)
 		}
-		return nil, fmt.Errorf("session: insert user: %w", err)
+		id = u.ID
+		if err := tx.Create(&subscriptionRow{UserID: id, Tier: string(quota.DefaultTier)}).Error; err != nil {
+			return fmt.Errorf("session: insert subscription: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return &User{ID: u.ID, Email: email}, nil
+	return &User{ID: id, Email: email}, nil
 }
 
 // Login verifies email/password and returns the matching user.
@@ -202,6 +225,9 @@ func (s *Store) LoginOrCreateWithGoogle(googleID, email string) (user *User, cre
 		u := userRow{Email: email, PasswordHash: nil}
 		if err := tx.Create(&u).Error; err != nil {
 			return fmt.Errorf("session: insert user: %w", err)
+		}
+		if err := tx.Create(&subscriptionRow{UserID: u.ID, Tier: string(quota.DefaultTier)}).Error; err != nil {
+			return fmt.Errorf("session: insert subscription: %w", err)
 		}
 		if err := tx.Create(&identityRow{UserID: u.ID, Provider: "google", ProviderUserID: googleID, ProviderEmail: email}).Error; err != nil {
 			return fmt.Errorf("session: link google identity: %w", err)
