@@ -12,6 +12,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         candidate: resolve(__dirname, 'candidate/index.html'),
         candidateSubscribe: resolve(__dirname, 'candidate/subscribe.html'),
+        candidatePayTest: resolve(__dirname, 'candidate/pay-test.html'),
       },
     },
   },

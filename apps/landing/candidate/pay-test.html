@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>金流測試頁（TapPay Sandbox）</title>
+  <link rel="stylesheet" href="../assets/base.css" />
+  <link rel="stylesheet" href="./theme.css" />
+  <style>
+    main { max-width: 720px; margin: 0 auto; padding: 0 20px 64px; }
+    .step { margin-bottom: 20px; }
+    .step h2 { font-size: 1.1rem; display: flex; gap: 10px; align-items: center; }
+    .badge { font-size: .75rem; padding: 2px 10px; border-radius: 999px; background: var(--bg-sunken); color: var(--ink-dim); font-weight: 700; }
+    .badge.ok { background: #e5f6ee; color: #1f7a50; }
+    .badge.bad { background: #fdeae6; color: #b03a26; }
+    label.field { display: block; margin-bottom: 12px; font-weight: 700; font-size: .9rem; }
+    input[type=text], input[type=email], input[type=password] { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font: inherit; background: #fff; }
+    .tpfield { height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; margin-top: 4px; }
+    .tpfield.tappay-field-focus { border-color: var(--brand); }
+    .tpfield.has-error { border-color: #c0392b; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > * { flex: 1 1 140px; }
+    .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .plan-opt { display: flex; gap: 8px; align-items: center; padding: 8px 0; }
+    pre#log { background: #1e1e2a; color: #d7dcff; padding: 14px; border-radius: 12px; max-height: 260px; overflow: auto; font-size: .8rem; white-space: pre-wrap; word-break: break-all; }
+    .warn { background: var(--accent-wash); border-radius: var(--radius-md); padding: 12px 16px; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="logo" href="../index.html">ai-support</a>
+      <div class="links"><a href="./index.html">候選人介紹</a><a href="./subscribe.html">訂閱頁</a></div>
+    </nav>
+  </div>
+
+  <main>
+    <h1>金流測試頁 <span class="badge">僅供開發</span></h1>
+    <p class="warn">只用 <b>Sandbox</b> 測試。請勿輸入真實信用卡號。這個頁面會呼叫後端的 <code>/console/billing/*</code>，並會在資料庫建立測試帳號與訂閱。</p>
+
+    <section class="card step">
+      <h2>0. 後端位址 <span class="badge" id="cfgBadge">未連線</span></h2>
+      <label class="field">API 位址
+        <input type="text" id="api" value="http://localhost:8082" />
+      </label>
+      <div class="btns"><button class="btn ghost sm" id="btnCfg" type="button">檢查金流設定</button></div>
+      <p class="note" id="cfgNote" style="margin:8px 0 0"></p>
+    </section>
+
+    <section class="card step">
+      <h2>1. 登入 <span class="badge" id="meBadge">未登入</span></h2>
+      <div class="row">
+        <label class="field">Email<input type="email" id="email" autocomplete="email" /></label>
+        <label class="field">密碼（至少 8 碼）<input type="password" id="password" autocomplete="current-password" /></label>
+      </div>
+      <div class="btns">
+        <button class="btn sm" id="btnRegister" type="button">註冊</button>
+        <button class="btn ghost sm" id="btnLogin" type="button">登入</button>
+        <button class="btn ghost sm" id="btnLogout" type="button">登出</button>
+      </div>
+    </section>
+
+    <section class="card step">
+      <h2>2. 選擇方案</h2>
+      <div id="plans" class="note">載入中…</div>
+    </section>
+
+    <section class="card step">
+      <h2>3. 卡片 <span class="badge" id="cardBadge">未就緒</span></h2>
+      <p class="note">Sandbox 測試卡：卡號 <code>4242 4242 4242 4242</code>、到期日填未來月份、CCV <code>123</code>（以 TapPay 官方文件為準）。</p>
+      <label class="field">卡號<div id="card-number" class="tpfield"></div></label>
+      <div class="row">
+        <label class="field">到期日 (MM/YY)<div id="card-exp" class="tpfield"></div></label>
+        <label class="field">安全碼<div id="card-ccv" class="tpfield"></div></label>
+      </div>
+      <div class="row">
+        <label class="field">持卡人姓名<input type="text" id="holderName" autocomplete="cc-name" /></label>
+        <label class="field">持卡人 Email<input type="email" id="holderEmail" /></label>
+      </div>
+      <label class="field">手機號碼<input type="text" id="holderPhone" inputmode="tel" /></label>
+      <div class="btns">
+        <button class="btn" id="btnPay" type="button" disabled>取得 Prime 並訂閱</button>
+      </div>
+    </section>
+
+    <section class="card step">
+      <h2>4. 目前訂閱與額度</h2>
+      <div id="sub" class="note">尚未載入</div>
+      <div class="btns">
+        <button class="btn ghost sm" id="btnRefresh" type="button">重新整理</button>
+        <button class="btn ghost sm" id="btnCancel" type="button">取消訂閱</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>紀錄</h2>
+      <pre id="log" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <script src="https://js.tappaysdk.com/sdk/tpdirect/v5.19.2"></script>
+  <script>
+    const $ = (id) => document.getElementById(id)
+    const state = { cfg: null, tier: null, canGetPrime: false, sdkReady: false, loggedIn: false }
+    const apiBase = () => $('api').value.trim().replace(/\/+$/, '')
+
+    function log(msg, data) {
+      const line = '[' + new Date().toLocaleTimeString() + '] ' + msg + (data === undefined ? '' : ' ' + JSON.stringify(data))
+      $('log').textContent = line + '\n' + $('log').textContent
+    }
+    function badge(el, text, cls) { el.textContent = text; el.className = 'badge' + (cls ? ' ' + cls : '') }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(apiBase() + path, {
+        credentials: 'include',
+        headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+        ...opts,
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      })
+      const text = await res.text()
+      let data = text
+      try { data = text ? JSON.parse(text) : null } catch { /* plain-text error body */ }
+      if (!res.ok) throw Object.assign(new Error(typeof data === 'string' ? data.trim() : 'HTTP ' + res.status), { status: res.status })
+      return data
+    }
+
+    function updatePayButton() {
+      $('btnPay').disabled = !(state.sdkReady && state.canGetPrime && state.loggedIn && state.tier)
+    }
+
+    async function loadConfig() {
+      try {
+        state.cfg = await api('/console/billing/config')
+      } catch (e) {
+        badge($('cfgBadge'), '連不上後端', 'bad')
+        $('cfgNote').textContent = '請確認後端已啟動，且 ALLOWED_ORIGIN 含 ' + location.origin + '。（' + e.message + '）'
+        log('config failed', e.message)
+        return
+      }
+      if (!state.cfg.enabled) {
+        badge($('cfgBadge'), '金流未啟用', 'bad')
+        $('cfgNote').textContent = '後端未設定 TapPay 金鑰（TAPPAY_APP_ID / APP_KEY / PARTNER_KEY / MERCHANT_ID），仍可測試登入與方案列表。'
+        return
+      }
+      badge($('cfgBadge'), '環境：' + state.cfg.env, state.cfg.env === 'sandbox' ? 'ok' : 'bad')
+      $('cfgNote').textContent = state.cfg.env === 'sandbox' ? '' : '⚠ 這不是 Sandbox！送出會真的扣款。'
+      setupTapPay()
+    }
+
+    function setupTapPay() {
+      if (state.sdkReady) return
+      if (typeof TPDirect === 'undefined') { log('TapPay SDK 未載入（網路或版本問題）'); return }
+      TPDirect.setupSDK(Number(state.cfg.appId), state.cfg.appKey, state.cfg.env)
+      TPDirect.card.setup({
+        fields: {
+          number: { element: '#card-number', placeholder: '**** **** **** ****' },
+          expirationDate: { element: '#card-exp', placeholder: 'MM / YY' },
+          ccv: { element: '#card-ccv', placeholder: 'CCV' },
+        },
+        styles: { input: { color: '#2c2a28', 'font-size': '16px' }, '.invalid': { color: '#c0392b' } },
+      })
+      TPDirect.card.onUpdate((u) => {
+        state.canGetPrime = !!u.canGetPrime
+        badge($('cardBadge'), u.canGetPrime ? '可送出' : '填寫中', u.canGetPrime ? 'ok' : '')
+        $('card-number').classList.toggle('has-error', u.status.number === 2)
+        $('card-exp').classList.toggle('has-error', u.status.expiry === 2)
+        $('card-ccv').classList.toggle('has-error', u.status.ccv === 2)
+        updatePayButton()
+      })
+      state.sdkReady = true
+      badge($('cardBadge'), '填寫中')
+    }
+
+    async function loadPlans() {
+      try {
+        const plans = await api('/console/billing/plans')
+        const box = $('plans'); box.textContent = ''
+        plans.forEach((p, i) => {
+          const label = document.createElement('label'); label.className = 'plan-opt'
+          const r = document.createElement('input'); r.type = 'radio'; r.name = 'plan'; r.value = p.tier
+          r.addEventListener('change', () => { state.tier = p.tier; updatePayButton() })
+          label.append(r, document.createTextNode(p.name + '　NT$ ' + p.amount.toLocaleString() + ' / 月'))
+          box.append(label)
+          if (i === 0) { r.checked = true; state.tier = p.tier }
+        })
+        updatePayButton()
+      } catch (e) { $('plans').textContent = '無法載入方案：' + e.message }
+    }
+
+    async function refreshMe() {
+      try {
+        const me = await api('/auth/me')
+        state.loggedIn = true
+        badge($('meBadge'), me.Email || me.email || '已登入', 'ok')
+      } catch {
+        state.loggedIn = false
+        badge($('meBadge'), '未登入')
+      }
+      updatePayButton()
+    }
+
+    async function refreshSub() {
+      const box = $('sub')
+      if (!state.loggedIn) { box.textContent = '請先登入'; return }
+      const lines = []
+      try {
+        const q = await api('/console/quota')
+        lines.push(q.enabled ? '方案：' + q.planName + '（' + q.tier + '）　用量 ' + q.used + ' / ' + q.limit : '額度功能未啟用')
+      } catch (e) { lines.push('額度讀取失敗：' + e.message) }
+      try {
+        const s = await api('/console/billing/subscription')
+        lines.push(s ? '訂閱：' + s.status + '　卡號末四碼 ' + s.cardLastFour + '　本期至 ' + new Date(s.currentPeriodEnd).toLocaleString() : '尚未訂閱')
+      } catch (e) { lines.push('訂閱讀取失敗：' + e.message) }
+      box.textContent = lines.join('\n'); box.style.whiteSpace = 'pre-line'
+    }
+
+    async function authCall(path) {
+      const email = $('email').value.trim(), password = $('password').value
+      try {
+        await api(path, { method: 'POST', body: { email, password } })
+        log(path + ' ok')
+      } catch (e) { log(path + ' failed', e.message) }
+      await refreshMe(); await refreshSub()
+    }
+
+    $('btnCfg').addEventListener('click', loadConfig)
+    $('btnRegister').addEventListener('click', () => authCall('/auth/register'))
+    $('btnLogin').addEventListener('click', () => authCall('/auth/login'))
+    $('btnLogout').addEventListener('click', async () => {
+      try { await api('/auth/logout', { method: 'POST' }) } catch (e) { log('logout failed', e.message) }
+      await refreshMe(); await refreshSub()
+    })
+    $('btnRefresh').addEventListener('click', refreshSub)
+    $('btnCancel').addEventListener('click', async () => {
+      try { log('cancel ok', await api('/console/billing/cancel', { method: 'POST' })) }
+      catch (e) { log('cancel failed', e.message) }
+      refreshSub()
+    })
+
+    $('btnPay').addEventListener('click', () => {
+      $('btnPay').disabled = true
+      TPDirect.card.getPrime(async (result) => {
+        if (result.status !== 0) {
+          log('getPrime failed', { status: result.status, msg: result.msg })
+          updatePayButton(); return
+        }
+        log('got prime (not logged for safety), subscribing…')
+        try {
+          const p = await api('/console/billing/subscribe', {
+            method: 'POST',
+            body: {
+              tier: state.tier, prime: result.card.prime,
+              cardholder: {
+                name: $('holderName').value.trim(),
+                email: $('holderEmail').value.trim(),
+                phoneNumber: $('holderPhone').value.trim(),
+              },
+            },
+          })
+          log('subscribe OK', p)
+        } catch (e) { log('subscribe FAILED (HTTP ' + e.status + ')', e.message) }
+        await refreshSub(); updatePayButton()
+      })
+    })
+
+    ;(async () => { await loadConfig(); await loadPlans(); await refreshMe(); await refreshSub() })()
+  </script>
+</body>
+</html>
