@@ -6,6 +6,9 @@ import { resolve } from 'node:path'
 // 每種業主類型一個子資料夾（candidate/ …），各自帶自己的 theme.css；
 // 多頁面都要列在 input，build 才會輸出。Builds to the default dist/ (gitignored).
 export default defineConfig({
+  server: {
+    port: 5176,
+  },
   build: {
     rollupOptions: {
       input: {

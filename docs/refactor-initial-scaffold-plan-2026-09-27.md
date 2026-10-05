@@ -1,6 +1,6 @@
 # ai-support 初始骨架規劃（2026-09-27）
 
-現況：**後端空骨架已建立，可編譯、未串接前端與 onagent；`apps/console`、`apps/support` 前端已完成第一版 UI（假資料，未串接真實後端），尚未實測執行**。這份文件記錄需求討論的完整脈絡與目前進度，供之後開新對話接手實作時使用——不需要重新問一輪已經定案的問題。
+現況（2026-10-06 更新）：**後端骨架可編譯、`apps/console`/`apps/support` 前端完成第一版 UI（假資料，未串接真實後端）；另外有一批不在這份文件原始規劃範圍內、由其他 session 加入的工作——`internal/billing`/`internal/tappay`/`internal/quota`（訂閱付費 + TapPay 金流 + 用量額度）、`apps/landing/candidate/`（候選人介紹頁、訂閱頁、TapPay 金流測試頁）。這份文件記錄需求討論的完整脈絡與目前進度，供之後開新對話接手實作時使用——不需要重新問一輪已經定案的問題。**TapPay Sandbox 金流已實測成功**（端到端走過一次完整訂閱流程），見下方「TapPay 金流測試進度」一節。
 
 ## 產品定位
 
@@ -69,6 +69,32 @@
 4. **表單「可以儲存」的判斷邏輯，要跟「實際送出」的資料處理方式完全一致**——onagent 曾發生用 trim 過的字串判斷「可以存」，但實際送出時沒有 trim，導致帶尾隨空白的內容通過檢查、悄悄存進去。
 5. **不要在頁面一載入就開真實的 WebSocket 連線**——消費者服務頁面嵌入 `@onagent/bridge` 時，如果打算要有「先看到歡迎畫面、點擊才開始對話」這類 UX，連線時機要對應到使用者實際的互動意圖，不要頁面一開就搶先連線（onagent 手機版曾犯過這個錯，使用者根本還沒點開功能就先建立了 WebSocket）。
 6. **捨棄變更的確認對話框，取消後畫面不該繼續切換**——onagent 曾發生使用者按下「取消捨棄」，畫面卻還是換到新畫面，未儲存的編輯被靜默覆蓋。任何「離開前確認」的邏輯，要確保取消真的能擋住後續的畫面/狀態切換，不能只是彈出對話框但邏輯繼續往下跑。
+
+## TapPay 金流測試進度（2026-10-06）
+
+目的：驗證 `internal/tappay`/`internal/billing`（commit `a9da83a`）跟 `apps/landing/candidate/pay-test.html`（commit `2a51773`）這兩批由其他 session 加入、原本沒有規劃在這份文件裡的程式碼是否真的能跑通。
+
+**已完成：**
+
+- `backend/.env` 已建立（複製自 `.env.example`，`.gitignore` 確認排除，不進版控）
+- TapPay Sandbox 四個值已取得並填入 `.env`：
+  - `TAPPAY_APP_ID`/`TAPPAY_APP_KEY`：Portal「應用程式」頁拿到的
+  - `TAPPAY_MERCHANT_ID=tim72117_CTBC`：Portal「特店資訊」列表裡，備註全是「非 XXX」（非 3D 驗證/非銀聯卡/非批次請款/非超商/非代收付商家）的那一筆，對應一般 Web 信用卡 Pay by Prime 收單（**不要**選 `_PLUS_PAY_BINDING` 那種——那是另一套綁定式扣款 API，跟這次後端寫的 pay-by-prime 流程不同）
+  - `TAPPAY_PARTNER_KEY`：Portal 帳號設定頁找到，64 字元長度，格式合理（第一次誤填成收單帳號代碼 `3168`，已更正）
+- 修正 `.env` 裡 `ALLOWED_ORIGIN`/`CONSOLE_URL` 的 port（舊值是 `5175`/`5201`，跟三個前端 app 實際的 vite port 對不上，導致 CORS 擋下請求）：現在是 console=5174、support=5175、landing=5176
+- 本機沒有裝 Postgres，用 Docker 啟了一個對應 `.env`（`DATABASE_URL` 指到 `localhost:5434`，user/pass `platform`）的 container：`docker run --name ai-support-postgres -e POSTGRES_USER=platform -e POSTGRES_PASSWORD=platform -e POSTGRES_DB=platform -p 5434:5432 -d postgres:16-alpine`
+- `go run ./cmd/server` 成功啟動，log 顯示 `TapPay billing enabled env=sandbox`，`/console/billing/config` 正確回應
+- 用 `apps/landing/candidate/pay-test.html` 實測：登入 → 選方案 → TapPay SDK 卡片欄位 → **成功取得 Prime**（代表 App ID/App Key 與前端 SDK 串接沒問題）
+
+**中途卡過的地方（已解決）：**
+
+- 呼叫 `/console/billing/subscribe`（後端拿 Prime 打 TapPay 伺服器端 API）一度回傳 **HTTP 402 `card declined: IP mismatch`**（`payments` 表 `id=1,2` 的 `failed` 紀錄）
+- 原因是 TapPay Sandbox 的 Partner Key 綁定了 IP 白名單，Portal 介面上找不到自助設定入口（翻過「應用程式」「特店列表」「帳號設定」都沒看到明確的 IP 白名單欄位），後續用戶自行處理後解除
+- 測試當下的來源 IP 是 `111.243.64.225`，供日後對照
+
+**結果：2026-10-05 17:44 UTC 測試成功** —— `payments` 表 `id=3` 狀態 `succeeded`，金額 NT$990。整條鏈路（前端 TapPay SDK 取得 Prime → 後端 `/console/billing/subscribe` → TapPay 伺服器 API → 寫入 `subscriptions`/`payments`）已驗證端到端可行。
+
+**`apps/landing/candidate/pay-test.html` 的小改動：** 為了方便重複手動測試，已把登入 email/password、持卡人姓名/Email/手機號碼欄位加上預設值（卡號/到期日/CCV 是 TapPay iframe，技術上無法預填，仍須每次手動輸入 `4242 4242 4242 4242` / 未來月份 / `123`）。
 
 ## 尚未完成、接手時的優先順序建議
 
