@@ -60,6 +60,27 @@ jobs:
         if: github.event.inputs.skip_build != 'true'
         run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
 
+      # TEMPORARY debug step: Push image has been failing with
+      # "Unauthenticated request" against Artifact Registry despite the
+      # Authenticate step reporting success. Print what identity gcloud
+      # actually resolved so we can tell whether the WIF token exchange
+      # itself is failing (no active account / wrong principal) versus an
+      # IAM permission problem on a correctly-resolved identity. Remove once
+      # the root cause is found and fixed.
+      - name: Debug - show resolved identity
+        if: github.event.inputs.skip_build != 'true'
+        run: |
+          echo "--- gcloud auth list ---"
+          gcloud auth list
+          echo "--- gcloud config list ---"
+          gcloud config list
+          echo "--- attempting to print an access token (first 20 chars only) ---"
+          gcloud auth print-access-token 2>&1 | head -c 20
+          echo ""
+          echo "--- ADC check ---"
+          gcloud auth application-default print-access-token 2>&1 | head -c 20 || true
+          echo ""
+
       - name: Build Docker image
         if: github.event.inputs.skip_build != 'true'
         run: |
