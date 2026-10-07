@@ -78,6 +78,32 @@ jobs:
         if: github.event.inputs.skip_build != 'true'
         run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
 
+      # TEMPORARY debug step: Push image keeps failing with "Unauthenticated
+      # request" against Artifact Registry despite every prior fix (explicit
+      # gcloud auth login, --quiet to avoid the interactive overwrite
+      # prompt). Print exactly what identity/token gcloud now resolves, try
+      # the Artifact Registry API directly with that token, and dump the
+      # docker credential helper config this step just wrote — to isolate
+      # whether this is a token problem or specifically a docker-push-path
+      # problem. Remove once root-caused.
+      - name: Debug - verify identity and direct API access
+        run: |
+          echo "--- gcloud auth list ---"
+          gcloud auth list
+          echo "--- active account access token (first 20 chars) ---"
+          TOKEN=$(gcloud auth print-access-token 2>&1)
+          echo "${TOKEN}" | head -c 20
+          echo ""
+          echo "--- token length ---"
+          echo "${#TOKEN}"
+          echo "--- direct Artifact Registry API call with this token ---"
+          curl -s -X GET \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://artifactregistry.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLOUD_RUN_REGION}/repositories/cloud-run-source-deploy"
+          echo ""
+          echo "--- cat the docker config credential helper section ---"
+          cat ~/.docker/config.json 2>&1 || echo "(no docker config)"
+
       - name: Build Docker image
         if: github.event.inputs.skip_build != 'true'
         run: |
