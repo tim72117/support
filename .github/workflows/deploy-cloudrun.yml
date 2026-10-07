@@ -71,6 +71,22 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      # TEMPORARY debug: isolate whether the identity itself works at all
+      # (via a plain gcloud API call, nothing docker-related) before even
+      # touching Artifact Registry/Docker. If this also fails as
+      # unauthenticated, the problem is upstream of docker entirely — the
+      # WIF exchange itself, or this project's IAM, not anything about how
+      # Configure Docker/docker push are invoked.
+      - name: Debug - minimal gcloud API call (no docker involved)
+        run: |
+          echo "--- whoami ---"
+          gcloud auth list
+          echo "--- can we describe the project at all? ---"
+          gcloud projects describe "${GCP_PROJECT_ID}" --format="value(projectId,projectNumber)"
+          echo "--- can we describe the Artifact Registry repo via gcloud (not curl, not docker)? ---"
+          gcloud artifacts repositories describe cloud-run-source-deploy \
+            --project="${GCP_PROJECT_ID}" --location="${CLOUD_RUN_REGION}"
+
       # skip_build 只在 workflow_dispatch 觸發時才可能是 true(tag push
       # 觸發沒有這個 input,github.event.inputs.skip_build 會是空字串,
       # != 'true' 成立,以下步驟正常執行)。
