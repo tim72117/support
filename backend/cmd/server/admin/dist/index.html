@@ -1,0 +1,14 @@
+<!doctype html>
+<!--
+  Placeholder checked into git so `go build`/`go:embed` has something to
+  embed before a real apps/admin build is copied in here. apps/admin is not
+  currently part of backend/Dockerfile's build stages (see
+  cmd/server/static_admin.go's doc comment for why) — for a local/manual
+  deploy that wants the real admin UI embedded, run `npm run build` in
+  apps/admin (base: '/admin/') and copy its dist/ output over this
+  directory before `go build`.
+-->
+<html lang="zh-Hant">
+<head><meta charset="UTF-8" /><title>ai-support admin (placeholder build)</title></head>
+<body>admin placeholder — run "npm run build" in apps/admin and rebuild.</body>
+</html>

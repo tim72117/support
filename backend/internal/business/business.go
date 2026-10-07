@@ -31,9 +31,14 @@ const (
 	MaxTagRunes   = 80
 	DefaultMascot = "fox"
 	DefaultColor  = "#FF8A5B"
+	DefaultLayout = "center"
 )
 
-var mascots = map[string]bool{"fox": true, "bear": true, "cat": true, "bird": true}
+var mascots = map[string]bool{
+	"fox": true, "bear": true, "cat": true, "bird": true,
+	"rabbit": true, "dog": true, "owl": true, "penguin": true, "panda": true, "pig": true,
+}
+var layouts = map[string]bool{"center": true, "split": true}
 
 // ErrInvalidSlug / ErrInvalidName are returned by Create for input the caller
 // should fix (as opposed to a server fault).
@@ -57,6 +62,7 @@ type Business struct {
 	Tagline    string
 	Mascot     string
 	ThemeColor string
+	Layout     string
 	// Connected is true once the business has an onagent app and key, i.e. its
 	// consumer page can actually chat. Derived, not stored.
 	Connected    bool
@@ -75,6 +81,7 @@ type businessRow struct {
 	Tagline       string  `gorm:"column:tagline"`
 	Mascot        string  `gorm:"column:mascot"`
 	ThemeColor    string  `gorm:"column:theme_color"`
+	Layout        string  `gorm:"column:layout"`
 	OnagentAppID  *string `gorm:"column:onagent_app_id"`
 	OnagentAPIKey *string `gorm:"column:onagent_api_key"`
 }
@@ -84,7 +91,7 @@ func (businessRow) TableName() string { return "businesses" }
 func (r businessRow) toBusiness() *Business {
 	return &Business{
 		ID: r.ID, OwnerID: r.OwnerID, Slug: r.Slug, Name: r.Name,
-		Tagline: r.Tagline, Mascot: r.Mascot, ThemeColor: r.ThemeColor,
+		Tagline: r.Tagline, Mascot: r.Mascot, ThemeColor: r.ThemeColor, Layout: r.Layout,
 		Connected:    r.OnagentAppID != nil && *r.OnagentAppID != "" && r.OnagentAPIKey != nil && *r.OnagentAPIKey != "",
 		OnagentAppID: r.OnagentAppID, OnagentAPIKey: r.OnagentAPIKey,
 	}
@@ -113,6 +120,7 @@ type Branding struct {
 	Tagline    string
 	Mascot     string
 	ThemeColor string
+	Layout     string
 }
 
 // normalize trims and defaults b, and reports what is wrong with it.
@@ -125,6 +133,9 @@ func (b Branding) normalize() (Branding, error) {
 	if b.ThemeColor == "" {
 		b.ThemeColor = DefaultColor
 	}
+	if b.Layout == "" {
+		b.Layout = DefaultLayout
+	}
 	switch {
 	case b.Name == "":
 		return b, ErrInvalidName
@@ -136,6 +147,8 @@ func (b Branding) normalize() (Branding, error) {
 		return b, fmt.Errorf("%w: unknown mascot %q", ErrInvalidBranding, b.Mascot)
 	case !colorRE.MatchString(b.ThemeColor):
 		return b, fmt.Errorf("%w: theme color must look like #RRGGBB", ErrInvalidBranding)
+	case !layouts[b.Layout]:
+		return b, fmt.Errorf("%w: unknown layout %q", ErrInvalidBranding, b.Layout)
 	}
 	return b, nil
 }
@@ -157,7 +170,7 @@ func (s *Store) CreateWithBranding(ownerID int64, slug string, in Branding) (*Bu
 	if err != nil {
 		return nil, err
 	}
-	row := businessRow{OwnerID: ownerID, Slug: slug, Name: br.Name, Tagline: br.Tagline, Mascot: br.Mascot, ThemeColor: br.ThemeColor}
+	row := businessRow{OwnerID: ownerID, Slug: slug, Name: br.Name, Tagline: br.Tagline, Mascot: br.Mascot, ThemeColor: br.ThemeColor, Layout: br.Layout}
 	if err := s.db.Create(&row).Error; err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
@@ -177,6 +190,7 @@ type Patch struct {
 	Tagline    *string
 	Mascot     *string
 	ThemeColor *string
+	Layout     *string
 }
 
 // Update applies p to the business and returns the result. The slug is
@@ -186,7 +200,7 @@ func (s *Store) Update(id int64, p Patch) (*Business, error) {
 	if err != nil {
 		return nil, err
 	}
-	next := Branding{Name: cur.Name, Tagline: cur.Tagline, Mascot: cur.Mascot, ThemeColor: cur.ThemeColor}
+	next := Branding{Name: cur.Name, Tagline: cur.Tagline, Mascot: cur.Mascot, ThemeColor: cur.ThemeColor, Layout: cur.Layout}
 	if p.Name != nil {
 		next.Name = *p.Name
 	}
@@ -199,12 +213,15 @@ func (s *Store) Update(id int64, p Patch) (*Business, error) {
 	if p.ThemeColor != nil {
 		next.ThemeColor = *p.ThemeColor
 	}
+	if p.Layout != nil {
+		next.Layout = *p.Layout
+	}
 	br, err := next.normalize()
 	if err != nil {
 		return nil, err
 	}
 	res := s.db.Model(&businessRow{}).Where("id = ?", id).
-		Updates(map[string]any{"name": br.Name, "tagline": br.Tagline, "mascot": br.Mascot, "theme_color": br.ThemeColor})
+		Updates(map[string]any{"name": br.Name, "tagline": br.Tagline, "mascot": br.Mascot, "theme_color": br.ThemeColor, "layout": br.Layout})
 	if res.Error != nil {
 		return nil, fmt.Errorf("business: update: %w", res.Error)
 	}
@@ -228,6 +245,23 @@ func (s *Store) ListByOwner(ownerID int64) ([]*Business, error) {
 	var rows []businessRow
 	if err := s.db.Where("owner_id = ?", ownerID).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("business: list: %w", err)
+	}
+	out := make([]*Business, len(rows))
+	for i, r := range rows {
+		out[i] = r.toBusiness()
+	}
+	return out, nil
+}
+
+// ListAll returns every business regardless of owner, newest first. Unlike
+// ListByOwner, this is not scoped to a single caller — it exists only for
+// the platform-admin back office (internal/admin), which is allowed to see
+// across every owner; normal console callers must never reach this (they go
+// through ListByOwner, which enforces the owner_id scope itself).
+func (s *Store) ListAll() ([]*Business, error) {
+	var rows []businessRow
+	if err := s.db.Order("id DESC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("business: list all: %w", err)
 	}
 	out := make([]*Business, len(rows))
 	for i, r := range rows {
@@ -298,6 +332,85 @@ func (s *Store) SetContentAndSections(businessID int64, content string, sections
 		return fmt.Errorf("business: set content: %w", res.Error)
 	}
 	return nil
+}
+
+// Section is one parsed content section, matching the console's
+// ContentSection shape (apps/console/src/model.ts) as stored verbatim in
+// business_content.sections. Only id/title/body are read here — the
+// console's "placeholder" field is editor-only guidance and is never part of
+// what SetContentAndSections receives (sectionsForBackend strips it before
+// saving), so there is nothing to decode for it.
+type Section struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// ErrSectionNotFound is returned by GetSection when the business has no
+// saved sections, or none with the requested id.
+var ErrSectionNotFound = errors.New("section not found")
+
+// ListSections returns the business's saved sections with non-empty bodies,
+// in their saved order, omitting the body text itself (title/id only) — this
+// is what the onagent list_sections tool answers with, letting the AI
+// discover what's available before asking for one section's full content.
+// Returns an empty (non-nil) slice when no sections were saved or none has a
+// body yet.
+func (s *Store) ListSections(businessID int64) ([]Section, error) {
+	_, raw, err := s.GetContentAndSections(businessID)
+	if err != nil {
+		return nil, err
+	}
+	all, err := parseSections(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Section, 0, len(all))
+	for _, sec := range all {
+		if strings.TrimSpace(sec.Body) == "" {
+			continue
+		}
+		out = append(out, Section{ID: sec.ID, Title: sec.Title})
+	}
+	return out, nil
+}
+
+// GetSection returns one saved section's full content by id. ErrSectionNotFound
+// if the business has no sections saved, the id doesn't match any saved
+// section, or that section's body is empty (nothing to read yet).
+func (s *Store) GetSection(businessID int64, sectionID string) (Section, error) {
+	_, raw, err := s.GetContentAndSections(businessID)
+	if err != nil {
+		return Section{}, err
+	}
+	all, err := parseSections(raw)
+	if err != nil {
+		return Section{}, err
+	}
+	for _, sec := range all {
+		if sec.ID == sectionID {
+			if strings.TrimSpace(sec.Body) == "" {
+				return Section{}, ErrSectionNotFound
+			}
+			return sec, nil
+		}
+	}
+	return Section{}, ErrSectionNotFound
+}
+
+// parseSections decodes the opaque sections JSON into Section values. A nil
+// or empty raw is "no sections saved" (empty result, not an error) — this is
+// the normal state for a business that was created but never filled in, or
+// whose owner saved content before the editor's structured sections existed.
+func parseSections(raw json.RawMessage) ([]Section, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out []Section
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("business: parse sections: %w", err)
+	}
+	return out, nil
 }
 
 // SetOnagentApp records which onagent app this business maps to, once

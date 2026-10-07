@@ -1,0 +1,25 @@
+/* 店家與品牌主題：清新薄荷綠 + 暖橘點綴——延續 apps/console/apps/support
+   兩個產品介面已經在用的主題色家族（見 apps/console/src/style.css），讓從
+   這個介紹頁點進真正的 console/support 時，視覺不會突兀換掉。 */
+:root {
+  --brand: #2f9e8f;
+  --brand-strong: #257d71;
+  --brand-wash: #e6f9f7;
+  --accent: #ff8a5b;
+  --accent-wash: #fff1e8;
+  --hero-from: #e6f9f7;
+  --hero-to: #fbfaf7;
+}
+.hero .eyebrow { background: var(--accent-wash); color: #c15a2e; }
+.chat-mock { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); max-width: 460px; padding: 18px; margin-top: 36px; }
+.chat-mock .who { font-size: .8rem; color: var(--ink-dim); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.bubble { padding: 10px 14px; border-radius: 16px; margin-bottom: 8px; max-width: 85%; font-size: .95rem; }
+.bubble.q { background: var(--bg-sunken); }
+.bubble.a { background: var(--brand-wash); margin-left: auto; }
+.badge-ai { display: inline-block; font-size: .72rem; padding: 1px 8px; border-radius: 999px; background: var(--accent-wash); color: #c15a2e; font-weight: 700; }
+.trust { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; padding: 0; list-style: none; margin: 0; }
+.trust li { background: var(--bg-raised); border: 1px solid var(--border); padding: 8px 16px; border-radius: 999px; font-size: .9rem; }
+
+/* 小吉祥物圓標，呼應 apps/console／apps/support 的手繪吉祥物設定，在這裡
+   用簡化的 emoji 版本點出「有吉祥物」這個賣點，不重畫一次 SVG。 */
+.mascot-chip { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: var(--brand); font-size: 15px; flex-shrink: 0; }

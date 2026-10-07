@@ -215,6 +215,7 @@
 .mascotPicker,
 .colorPicker {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
@@ -248,6 +249,30 @@
 
 .colorOptionSelected {
   border-color: var(--ink);
+}
+
+.layoutPicker {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.layoutOption {
+  border: 2px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.layoutOptionSelected {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+  color: var(--brand-strong);
 }
 
 .input {

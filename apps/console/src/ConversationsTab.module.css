@@ -1,0 +1,139 @@
+.loadingBox {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--ink-dim);
+}
+
+.emptyBox {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--ink-faint);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-lg);
+}
+
+.retryButton {
+  display: block;
+  margin: var(--space-3) auto 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.listItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.listItem:hover {
+  border-color: var(--brand);
+}
+
+.listItemId {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.listItemTime {
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.backButton {
+  border: none;
+  background: none;
+  color: var(--brand-strong);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: var(--space-5);
+}
+
+.messageList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.bubbleRow {
+  display: flex;
+}
+
+.bubbleRowUser {
+  justify-content: flex-start;
+}
+
+.bubbleRowAssistant {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 70%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.bubbleUser {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.bubbleAssistant {
+  background: var(--brand-wash);
+  border: 1px solid var(--brand-wash);
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.bubbleRole {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bubbleContent {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.bubbleTime {
+  font-size: 11px;
+  color: var(--ink-faint);
+  align-self: flex-end;
+}

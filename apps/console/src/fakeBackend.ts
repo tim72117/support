@@ -12,7 +12,23 @@ interface Biz {
   Tagline: string
   Mascot: string
   ThemeColor: string
+  Layout: string
   Connected: boolean
+}
+
+interface FakeMessage {
+  id: number
+  conversationId: string
+  role: string
+  content: string
+  replyTo?: number
+  createdAt: string
+}
+
+interface FakeConversation {
+  id: string
+  businessId: number
+  createdAt: string
 }
 
 export interface Call {
@@ -33,9 +49,15 @@ export interface FakeBackend {
   /** Fail every request as if the network were down. */
   offline: boolean
   callsTo: (method: string, pathPattern: RegExp) => Call[]
+  conversations: FakeConversation[]
+  messages: FakeMessage[]
+  /** null = conversations feature not configured on this server (503), the
+   * same shape as a nil Chats store in backend/internal/console. */
+  conversationsEnabled: boolean
 }
 
-const MASCOTS = ['fox', 'bear', 'cat', 'bird']
+const MASCOTS = ['fox', 'bear', 'cat', 'bird', 'rabbit', 'dog', 'owl', 'penguin', 'panda', 'pig']
+const LAYOUTS = ['center', 'split']
 
 function res(status: number, body: unknown, headers: Record<string, string> = {}) {
   const text = body === null || body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body)
@@ -54,6 +76,9 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
     contents: new Map(),
     syncResult: 'ok',
     offline: false,
+    conversations: [],
+    messages: [],
+    conversationsEnabled: true,
     failNext(key, status, message = 'forced failure') {
       failures.set(key, { status, message })
     },
@@ -106,11 +131,33 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
           Tagline: String(body.tagline ?? '').trim(),
           Mascot: body.mascot || 'fox',
           ThemeColor: body.themeColor || '#FF8A5B',
+          Layout: body.layout || 'center',
           Connected: fb.syncResult === 'ok',
         }
         fb.businesses.push(biz)
         fb.contents.set(biz.ID, { Content: '', Sections: null })
         return res(200, { ...biz, onagentSync: fb.syncResult })
+      }
+
+      // --- conversations ---
+      const convMatch = path.match(/^\/console\/businesses\/(\d+)\/conversations(?:\/([^/]+))?$/)
+      if (convMatch) {
+        const bizId = Number(convMatch[1])
+        const convBiz = fb.businesses.find((b) => b.ID === bizId)
+        if (!convBiz) return res(404, '404 page not found')
+        if (!fb.conversationsEnabled) return res(503, 'conversations are unavailable')
+        const cid = convMatch[2]
+        if (!cid && method === 'GET') {
+          const list = fb.conversations.filter((c) => c.businessId === bizId)
+          return res(200, list.length ? list : null)
+        }
+        if (cid && method === 'GET') {
+          const conv = fb.conversations.find((c) => c.id === cid && c.businessId === bizId)
+          if (!conv) return res(404, '404 page not found')
+          const msgs = fb.messages.filter((m2) => m2.conversationId === cid)
+          return res(200, { ...conv, messages: msgs })
+        }
+        return res(404, '404 page not found')
       }
 
       const m = path.match(/^\/console\/businesses\/(\d+)(\/content|\/onagent-sync)?$/)
@@ -127,9 +174,11 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
         if (body.tagline !== undefined) next.Tagline = String(body.tagline).trim()
         if (body.mascot !== undefined) next.Mascot = body.mascot
         if (body.themeColor !== undefined) next.ThemeColor = body.themeColor
+        if (body.layout !== undefined) next.Layout = body.layout
         if (!next.Name) return res(400, 'name is required')
         if (!MASCOTS.includes(next.Mascot)) return res(400, 'invalid branding: unknown mascot')
         if (!/^#[0-9a-fA-F]{6}$/.test(next.ThemeColor)) return res(400, 'invalid branding: theme color must look like #RRGGBB')
+        if (!LAYOUTS.includes(next.Layout)) return res(400, 'invalid branding: unknown layout')
         Object.assign(biz, next)
         return res(200, biz)
       }
@@ -163,6 +212,7 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
       Tagline: '',
       Mascot: 'fox',
       ThemeColor: '#FF8A5B',
+      Layout: 'center',
       Connected: false,
       ...b,
     })

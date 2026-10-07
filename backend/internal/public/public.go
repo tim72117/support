@@ -67,6 +67,8 @@ const (
 
 type businessLookup interface {
 	GetBySlug(slug string) (*business.Business, error)
+	ListSections(businessID int64) ([]business.Section, error)
+	GetSection(businessID int64, sectionID string) (business.Section, error)
 }
 
 type chatStore interface {
@@ -102,6 +104,7 @@ type Handler struct {
 	ipChat   *limiter
 	ipReply  *limiter
 	convChat *limiter
+	ipTool   *limiter
 	log      *slog.Logger
 }
 
@@ -115,7 +118,16 @@ func NewHandler(cfg Config) *Handler {
 		ipChat:   newLimiter(30, time.Minute),
 		ipReply:  newLimiter(60, time.Minute),
 		convChat: newLimiter(10, time.Minute),
-		log:      log,
+		// ipTool bounds the onagent tool-call endpoints (list_sections /
+		// read_section). These are called from the visitor's own browser (the
+		// tool handler registered with @onagent/bridge, not onagent's backend
+		// itself — see apps/support/src/useChat.ts), so they need the same
+		// per-IP protection as the chat routes, not an open/unlimited rate.
+		// The allowance is generous relative to ipChat: a single chat turn can
+		// trigger several tool calls (list, then one read per relevant
+		// section) before the AI's reply is ready.
+		ipTool: newLimiter(120, time.Minute),
+		log:    log,
 	}
 }
 
@@ -125,6 +137,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /public/businesses/{slug}", h.getBusiness)
 	mux.HandleFunc("POST /public/businesses/{slug}/chat", h.chat)
 	mux.HandleFunc("POST /public/businesses/{slug}/chat/reply", h.reply)
+	mux.HandleFunc("GET /public/businesses/{slug}/sections", h.listSections)
+	mux.HandleFunc("GET /public/businesses/{slug}/sections/{id}", h.getSection)
 }
 
 // --- GET /public/businesses/{slug} ------------------------------------------
@@ -145,6 +159,7 @@ type businessResponse struct {
 	Tagline          string   `json:"tagline"`
 	Mascot           string   `json:"mascot"`
 	ThemeColor       string   `json:"themeColor"`
+	Layout           string   `json:"layout"`
 	MaxMessageLength int      `json:"maxMessageLength"`
 	Chat             chatInfo `json:"chat"`
 }
@@ -155,7 +170,7 @@ func (h *Handler) getBusiness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := businessResponse{
-		Slug: b.Slug, Name: b.Name, Tagline: b.Tagline, Mascot: b.Mascot, ThemeColor: b.ThemeColor,
+		Slug: b.Slug, Name: b.Name, Tagline: b.Tagline, Mascot: b.Mascot, ThemeColor: b.ThemeColor, Layout: b.Layout,
 		MaxMessageLength: MaxMessageRunes,
 	}
 	if h.chatAvailable(b) {
@@ -167,6 +182,65 @@ func (h *Handler) getBusiness(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) chatAvailable(b *business.Business) bool {
 	return h.cfg.OnagentWSURL != "" && b.OnagentAppID != nil && *b.OnagentAppID != "" &&
 		b.OnagentAPIKey != nil && *b.OnagentAPIKey != ""
+}
+
+// --- GET /public/businesses/{slug}/sections[/...] ----------------------------
+//
+// These back the onagent tools list_sections/read_section (see
+// backend/onagent-tools/*.yaml): onagent's inference runs on onagent's own
+// backend, but tool *execution* happens in the visitor's browser (see
+// @onagent/bridge's AgentBridgeOptions.tools) — onagent sends the tool call
+// over the WebSocket to the page, and the page's handler (useChat.ts) calls
+// these two routes to answer it. They are anonymous and slug-scoped exactly
+// like the chat routes, and rate-limited the same way: a caller does not need
+// a conversation to hit these, only the business's public slug.
+
+type sectionSummary struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+func (h *Handler) listSections(w http.ResponseWriter, r *http.Request) {
+	if !h.ipTool.allow(clientIP(r, h.cfg.TrustProxy)) {
+		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "請求太頻繁，請稍後再試。")
+		return
+	}
+	b, ok := h.lookup(w, r)
+	if !ok {
+		return
+	}
+	sections, err := h.cfg.Businesses.ListSections(b.ID)
+	if err != nil {
+		h.internal(w, "list sections", err)
+		return
+	}
+	out := make([]sectionSummary, len(sections))
+	for i, s := range sections {
+		out[i] = sectionSummary{ID: s.ID, Title: s.Title}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sections": out})
+}
+
+func (h *Handler) getSection(w http.ResponseWriter, r *http.Request) {
+	if !h.ipTool.allow(clientIP(r, h.cfg.TrustProxy)) {
+		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "請求太頻繁，請稍後再試。")
+		return
+	}
+	b, ok := h.lookup(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	section, err := h.cfg.Businesses.GetSection(b.ID, id)
+	if errors.Is(err, business.ErrSectionNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound, "找不到這個章節。")
+		return
+	}
+	if err != nil {
+		h.internal(w, "get section", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": section.ID, "title": section.Title, "body": section.Body})
 }
 
 // --- POST /public/businesses/{slug}/chat -------------------------------------

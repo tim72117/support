@@ -117,7 +117,19 @@ func TestBillingConfigAndPlans(t *testing.T) {
 		Amount int
 	}
 	_ = json.Unmarshal([]byte(body), &plans)
-	if code != 200 || len(plans) != 2 || plans[0].Tier != "starter" || plans[0].Amount != 990 || plans[1].Tier != "campaign" || plans[1].Amount != 2990 {
+	// Prices() lists every sellable plan across both product lines (see
+	// prices.go), not just the candidate line this test otherwise exercises
+	// — so this asserts the candidate plans are present and correct rather
+	// than that they're the only ones.
+	byTier := map[string]struct {
+		Tier   string
+		Name   string
+		Amount int
+	}{}
+	for _, p := range plans {
+		byTier[p.Tier] = p
+	}
+	if code != 200 || len(plans) != 4 || byTier["starter"].Amount != 990 || byTier["campaign"].Amount != 2990 {
 		t.Errorf("plans = %d %s", code, body)
 	}
 }
@@ -292,5 +304,35 @@ func TestCancelOverHTTP(t *testing.T) {
 	}
 	if code, _ := h.do(t, "POST", "/console/billing/cancel", nil, true); code != 404 {
 		t.Errorf("cancelling twice = %d, want 404", code)
+	}
+}
+
+func TestStartTrialOverHTTP(t *testing.T) {
+	h := newHTTPEnv(t, true)
+	code, body := h.do(t, "POST", "/console/billing/start-trial", nil, true)
+	if code != 200 || !strings.Contains(body, `"status":"trialing"`) {
+		t.Fatalf("start-trial = %d %s", code, body)
+	}
+	if h.tier(t) != quota.TierCandidateTrial {
+		t.Errorf("start-trial did not grant the trial tier: %s", h.tier(t))
+	}
+	if h.gw.primeCall != 0 {
+		t.Error("start-trial must never call the payment gateway")
+	}
+
+	if code, _ := h.do(t, "POST", "/console/billing/start-trial", nil, true); code != 409 {
+		t.Errorf("second start-trial = %d, want 409", code)
+	}
+}
+
+func TestStartTrialRequiresLoginAndConfiguredBilling(t *testing.T) {
+	h := newHTTPEnv(t, true)
+	if code, _ := h.do(t, "POST", "/console/billing/start-trial", nil, false); code != 401 {
+		t.Errorf("start-trial without login = %d, want 401", code)
+	}
+
+	disabled := newHTTPEnv(t, false)
+	if code, _ := disabled.do(t, "POST", "/console/billing/start-trial", nil, true); code != 503 {
+		t.Errorf("start-trial without TapPay configured = %d, want 503", code)
 	}
 }

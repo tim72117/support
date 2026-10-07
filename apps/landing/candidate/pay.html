@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>付款資料｜有問必答 選舉版</title>
+  <link rel="stylesheet" href="../assets/base.css" />
+  <link rel="stylesheet" href="./theme.css" />
+  <style>
+    .signup { max-width: 560px; margin: 0 auto; }
+    label.field { display: block; margin-bottom: 16px; font-weight: 700; font-size: .95rem; }
+    label.field input:not([type=radio]) { display: block; width: 100%; margin-top: 6px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; font: inherit; background: #fff; }
+    label.field input:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+    .summary { background: var(--brand-wash); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 16px; }
+    .done { text-align: center; max-width: 560px; margin: 40px auto 0; }
+    .tpfield { height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; margin-top: 6px; }
+    .tpfield.tappay-field-focus { border-color: var(--brand); }
+    .tpfield.has-error { border-color: #c0392b; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > * { flex: 1 1 160px; }
+    .banner { border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 20px; background: var(--accent-wash); font-size: .9rem; }
+    .msg-error { color: #c0392b; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .blocked { max-width: 560px; margin: 40px auto 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="logo" href="../index.html">有問必答 <span class="badge-ai" style="margin-left:4px">選舉版</span></a>
+      <div class="links"><a href="./subscribe.html">← 重新選擇方案</a></div>
+    </nav>
+  </div>
+
+  <main class="wrap" style="padding-bottom:48px">
+    <div class="section-title" style="padding-top:24px">
+      <h1>付款資料</h1>
+      <p>完成付款即開通你的 AI 替身。</p>
+    </div>
+
+    <div class="banner" id="banner" hidden></div>
+
+    <div class="blocked" id="blocked" hidden>
+      <p id="blockedText"></p>
+      <a class="btn" href="./subscribe.html">回到方案頁重新選擇</a>
+    </div>
+
+    <form id="payform" class="signup" novalidate>
+      <div class="summary" id="summary" aria-live="polite"></div>
+
+      <h2 style="margin-top:28px">付款資料</h2>
+      <p class="note">信用卡資料直接送到 TapPay，不會經過我們的伺服器。</p>
+      <label class="field">團隊名稱<input name="name" autocomplete="organization" /></label>
+      <label class="field">聯絡 Email<input name="email" type="email" autocomplete="email" /></label>
+      <label class="field">手機號碼<input name="phone" inputmode="tel" autocomplete="tel" /></label>
+      <label class="field">卡號<div id="card-number" class="tpfield"></div></label>
+      <div class="row">
+        <label class="field">到期日 (MM/YY)<div id="card-exp" class="tpfield"></div></label>
+        <label class="field">安全碼<div id="card-ccv" class="tpfield"></div></label>
+      </div>
+      <p id="error" class="note msg-error" role="alert" hidden></p>
+      <button class="btn" type="submit" id="submitBtn" style="width:100%" disabled>確認並付款</button>
+    </form>
+
+    <div class="done card" id="done" hidden>
+      <h2>訂閱完成 🎉</h2>
+      <p id="doneText"></p>
+      <a class="btn" id="goConsole" href="#">進入管理後台</a>
+    </div>
+  </main>
+
+  <script src="https://js.tappaysdk.com/sdk/tpdirect/v5.19.2"></script>
+  <script>
+    // 後端與管理後台的位址；開發時可用 ?api=...&console=... 覆寫。
+    const params = new URLSearchParams(location.search)
+    const API = (params.get('api') || 'http://localhost:8082').replace(/\/+$/, '')
+    const CONSOLE_URL = params.get('console') || 'http://localhost:5177'
+
+    // 方案清單需與 subscribe.html 的方案卡片一致。
+    const PLANS = {
+      starter: { name: '參選起步', price: 'NT$ 990 / 月' },
+      campaign: { name: '競選衝刺', price: 'NT$ 2,990 / 月' },
+    }
+
+    const $ = (id) => document.getElementById(id)
+    const form = $('payform')
+    const err = $('error')
+    const state = { billing: false, sdkReady: false, canGetPrime: false, email: null, busy: false, plan: null }
+
+    function showBlocked(msg) {
+      $('blockedText').textContent = msg
+      $('blocked').hidden = false
+      form.hidden = true
+    }
+
+    const planKey = params.get('plan')
+    if (!planKey || !PLANS[planKey]) {
+      showBlocked(!planKey ? '請先從方案頁選擇一個方案。' : '找不到這個方案「' + planKey + '」，請重新選擇。')
+    } else {
+      state.plan = planKey
+      $('summary').textContent = '已選方案：' + PLANS[planKey].name + '（' + PLANS[planKey].price + '）'
+    }
+
+    async function api(path, opts = {}) {
+      let res
+      try {
+        res = await fetch(API + path, {
+          method: opts.method || (opts.body ? 'POST' : 'GET'),
+          credentials: 'include',
+          headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+        })
+      } catch {
+        throw Object.assign(new Error('連不上伺服器，請稍後再試'), { status: 0 })
+      }
+      const text = await res.text()
+      if (!res.ok) throw Object.assign(new Error(text.trim() || 'HTTP ' + res.status), { status: res.status })
+      return text ? JSON.parse(text) : null
+    }
+
+    function showError(msg) { err.textContent = msg; err.hidden = !msg }
+    function showBanner(msg) { $('banner').textContent = msg; $('banner').hidden = !msg }
+    function updateSubmit() {
+      $('submitBtn').disabled = state.busy || !(state.billing && state.sdkReady && state.canGetPrime && state.plan)
+    }
+
+    async function init() {
+      if (!state.plan) return // 方案不合法，表單已隱藏，不需要繼續初始化
+
+      try {
+        const me = await api('/auth/me')
+        state.email = me.Email || me.email || null
+        if (state.email) form.elements.email.value = state.email
+      } catch {
+        // 未登入：理論上使用者應該已經在方案頁完成登入/註冊才會到這一頁，
+        // 但若直接貼網址進來，仍允許繼續（/console/billing/subscribe 需要登入，會在送出時失敗並提示）。
+        showBanner('你尚未登入，請先回方案頁登入或註冊。')
+      }
+
+      let cfg
+      try { cfg = await api('/console/billing/config') } catch (e) {
+        showBanner('目前無法連線到服務（' + e.message + '），暫時不能訂閱。')
+        return
+      }
+      if (!cfg.enabled) { showBanner('付款功能尚未開放，請稍後再試。'); return }
+      state.billing = true
+      if (cfg.env === 'sandbox') showBanner('目前是測試環境：請使用 TapPay 提供的測試卡號，不會真的扣款。')
+      setupTapPay(cfg)
+    }
+
+    function setupTapPay(cfg) {
+      if (typeof TPDirect === 'undefined') { showError('付款元件載入失敗，請重新整理頁面。'); return }
+      TPDirect.setupSDK(Number(cfg.appId), cfg.appKey, cfg.env)
+      TPDirect.card.setup({
+        fields: {
+          number: { element: '#card-number', placeholder: '**** **** **** ****' },
+          expirationDate: { element: '#card-exp', placeholder: 'MM / YY' },
+          ccv: { element: '#card-ccv', placeholder: 'CCV' },
+        },
+        styles: { input: { color: '#2c2a28', 'font-size': '16px' }, '.invalid': { color: '#c0392b' } },
+      })
+      TPDirect.card.onUpdate((u) => {
+        state.canGetPrime = !!u.canGetPrime
+        $('card-number').classList.toggle('has-error', u.status.number === 2)
+        $('card-exp').classList.toggle('has-error', u.status.expiry === 2)
+        $('card-ccv').classList.toggle('has-error', u.status.ccv === 2)
+        updateSubmit()
+      })
+      state.sdkReady = true
+      updateSubmit()
+    }
+
+    function getPrime() {
+      return new Promise((resolve, reject) => {
+        TPDirect.card.getPrime((r) =>
+          r.status === 0 ? resolve(r.card.prime) : reject(new Error('卡片資料有誤，請檢查後再試（' + r.msg + '）')))
+      })
+    }
+
+    const payErrors = {
+      401: '請先登入後再訂閱，將為你導向方案頁。',
+      402: '付款被銀行拒絕，請確認卡片資料或改用其他信用卡。',
+      409: '這個帳號已經有進行中的訂閱，請直接進入管理後台。',
+      502: '付款結果暫時無法確認。請先不要重複付款，並聯絡客服確認。',
+      503: '付款功能尚未開放，請稍後再試。',
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      if (state.busy || !state.billing || !state.plan) return
+      showError('')
+      const name = form.elements.name.value.trim()
+      const email = form.elements.email.value.trim()
+      const phone = form.elements.phone.value.trim()
+      if (!name || !phone) return showError('請填寫團隊名稱與手機號碼。')
+      if (!/^\S+@\S+\.\S+$/.test(email)) return showError('請填寫正確的 Email。')
+
+      state.busy = true; updateSubmit(); $('submitBtn').textContent = '處理中…'
+      try {
+        const prime = await getPrime() // 拿到後立刻使用，避免過期
+        await api('/console/billing/subscribe', {
+          body: { tier: state.plan, prime, cardholder: { name, email, phoneNumber: phone } },
+        })
+        $('goConsole').href = CONSOLE_URL
+        $('doneText').textContent = '已為 ' + email + ' 開通「' + PLANS[state.plan].name + '」。'
+        form.hidden = true; showBanner(''); $('done').hidden = false
+      } catch (e2) {
+        if (e2.status === 401) {
+          showError(payErrors[401])
+          setTimeout(() => { location.href = './subscribe.html?plan=' + encodeURIComponent(state.plan) }, 1500)
+        } else {
+          showError(payErrors[e2.status] || e2.message || '發生錯誤，請稍後再試。')
+        }
+      } finally {
+        state.busy = false; $('submitBtn').textContent = '確認並付款'; updateSubmit()
+      }
+    })
+
+    init()
+  </script>
+  <script type="module" src="../assets/site.js"></script>
+</body>
+</html>

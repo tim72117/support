@@ -21,6 +21,7 @@ type bizFull struct {
 	Tagline    string
 	Mascot     string
 	ThemeColor string
+	Layout     string
 	Connected  bool
 }
 
@@ -40,8 +41,8 @@ func TestCreateBusinessWithLook(t *testing.T) {
 	c := s.newClient()
 	c.register(uniqueEmail())
 
-	code, b, raw := c.createFull(uniqueSlug(), map[string]string{"name": "  選民服務  ", "tagline": " 24 小時回覆 ", "mascot": "bear", "themeColor": "#4ECDC4"})
-	if code != 200 || b.Name != "選民服務" || b.Tagline != "24 小時回覆" || b.Mascot != "bear" || b.ThemeColor != "#4ECDC4" {
+	code, b, raw := c.createFull(uniqueSlug(), map[string]string{"name": "  選民服務  ", "tagline": " 24 小時回覆 ", "mascot": "bear", "themeColor": "#4ECDC4", "layout": "split"})
+	if code != 200 || b.Name != "選民服務" || b.Tagline != "24 小時回覆" || b.Mascot != "bear" || b.ThemeColor != "#4ECDC4" || b.Layout != "split" {
 		t.Fatalf("create with look: %d %s", code, raw)
 	}
 	if b.Connected {
@@ -50,7 +51,7 @@ func TestCreateBusinessWithLook(t *testing.T) {
 
 	// Defaults when the look is omitted.
 	_, d, raw := c.createFull(uniqueSlug(), nil)
-	if d.Mascot != "fox" || d.ThemeColor != "#FF8A5B" || d.Tagline != "" {
+	if d.Mascot != "fox" || d.ThemeColor != "#FF8A5B" || d.Tagline != "" || d.Layout != "center" {
 		t.Errorf("defaults: %s", raw)
 	}
 
@@ -61,7 +62,7 @@ func TestCreateBusinessWithLook(t *testing.T) {
 		_ = json.Unmarshal([]byte(body), &x)
 		return code, x, body
 	}()
-	if got.Mascot != "bear" || got.ThemeColor != "#4ECDC4" || got.Tagline != "24 小時回覆" {
+	if got.Mascot != "bear" || got.ThemeColor != "#4ECDC4" || got.Tagline != "24 小時回覆" || got.Layout != "split" {
 		t.Errorf("GET lost the look: %+v", got)
 	}
 }
@@ -79,6 +80,7 @@ func TestCreateBusinessRejectsBadLook(t *testing.T) {
 		"non-hex color":    {"themeColor": "#GGGGGG"},
 		"overlong tagline": {"tagline": strings.Repeat("字", 81)},
 		"overlong name":    {"name": strings.Repeat("字", 61)},
+		"unknown layout":   {"layout": "sidebar"},
 	} {
 		if code, _, raw := c.createFull(uniqueSlug(), extra); code != 400 {
 			t.Errorf("%s: %d %s, want 400", name, code, raw)
@@ -104,7 +106,7 @@ func TestUpdateBusinessLook(t *testing.T) {
 	code, body, _ := c.do("PATCH", path, map[string]string{"name": "  新名字  "})
 	var u bizFull
 	_ = json.Unmarshal([]byte(body), &u)
-	if code != 200 || u.Name != "新名字" || u.Tagline != "原簡介" || u.Mascot != "cat" || u.ThemeColor != "#8E7DFF" {
+	if code != 200 || u.Name != "新名字" || u.Tagline != "原簡介" || u.Mascot != "cat" || u.ThemeColor != "#8E7DFF" || u.Layout != "center" {
 		t.Fatalf("partial patch: %d %s", code, body)
 	}
 
@@ -116,9 +118,9 @@ func TestUpdateBusinessLook(t *testing.T) {
 	}
 
 	// Everything at once.
-	_, body, _ = c.do("PATCH", path, map[string]string{"name": "三", "tagline": "四", "mascot": "bird", "themeColor": "#4C9EFF"})
+	_, body, _ = c.do("PATCH", path, map[string]string{"name": "三", "tagline": "四", "mascot": "bird", "themeColor": "#4C9EFF", "layout": "split"})
 	_ = json.Unmarshal([]byte(body), &u)
-	if u.Name != "三" || u.Tagline != "四" || u.Mascot != "bird" || u.ThemeColor != "#4C9EFF" {
+	if u.Name != "三" || u.Tagline != "四" || u.Mascot != "bird" || u.ThemeColor != "#4C9EFF" || u.Layout != "split" {
 		t.Errorf("full patch: %s", body)
 	}
 
@@ -135,6 +137,7 @@ func TestUpdateBusinessLook(t *testing.T) {
 		"bad mascot":   {"mascot": "robot"},
 		"bad color":    {"themeColor": "blue"},
 		"long tagline": {"tagline": strings.Repeat("a", 81)},
+		"bad layout":   {"layout": "sidebar"},
 	} {
 		if code, body, _ := c.do("PATCH", path, in); code != 400 {
 			t.Errorf("%s: %d %s, want 400", name, code, body)

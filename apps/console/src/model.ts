@@ -2,16 +2,29 @@
 // here is plain data/logic with no network and no fake records — the data
 // itself always comes from the backend (see BackendContext.tsx).
 
-export type MascotId = 'fox' | 'bear' | 'cat' | 'bird'
+export type MascotId = 'fox' | 'bear' | 'cat' | 'bird' | 'rabbit' | 'dog' | 'owl' | 'penguin' | 'panda' | 'pig'
 
 export const MASCOT_LABELS: Record<MascotId, string> = {
   fox: '小狐狸',
   bear: '小熊',
   cat: '小貓',
   bird: '小鳥',
+  rabbit: '小兔子',
+  dog: '小狗',
+  owl: '貓頭鷹',
+  penguin: '小企鵝',
+  panda: '小熊貓',
+  pig: '小豬',
 }
 
 export const THEME_COLORS = ['#FF8A5B', '#4ECDC4', '#8E7DFF', '#FFB84C', '#4C9EFF'] as const
+
+export type LayoutId = 'center' | 'split'
+
+export const LAYOUT_LABELS: Record<LayoutId, string> = {
+  center: '置中對話',
+  split: '左右對話',
+}
 
 /** One business (a consumer-facing support page) as the backend stores it. */
 export interface Business {
@@ -23,12 +36,14 @@ export interface Business {
   tagline: string
   themeColor: string
   mascot: MascotId
+  /** Which page layout the consumer-facing chat page uses. */
+  layout: LayoutId
   /** True once the business has an onagent app, i.e. its page can chat. */
   connected: boolean
 }
 
 /** The look settings an owner can change after creation (slug is not one of them). */
-export type BusinessPatch = Partial<Pick<Business, 'name' | 'tagline' | 'mascot' | 'themeColor'>>
+export type BusinessPatch = Partial<Pick<Business, 'name' | 'tagline' | 'mascot' | 'themeColor' | 'layout'>>
 
 export interface NewBusinessInput {
   slug: string
@@ -36,6 +51,7 @@ export interface NewBusinessInput {
   tagline?: string
   mascot: MascotId
   themeColor: string
+  layout?: LayoutId
 }
 
 /**
@@ -157,4 +173,23 @@ export function suggestSlug(name: string): string {
 
 export function isValidSlug(slug: string): boolean {
   return slug.length <= SLUG_MAX_LENGTH && SLUG_RE.test(slug)
+}
+
+// --- conversations -----------------------------------------------------
+
+/** One consumer-page chat transcript, listed under a business. */
+export interface Conversation {
+  id: string
+  createdAt: string
+}
+
+export interface ConversationMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ConversationMessage[]
 }

@@ -9,6 +9,7 @@ interface BridgeOpts {
   appId: string
   apiKey?: string
   lazyConnect?: boolean
+  tools?: Array<{ name: string; handle: (args: unknown) => unknown }>
   onAssistantMessage?: (text: string) => void
   onError?: (err: { message: string; code?: string }) => void
   onQuotaExceeded?: (err: { message: string }) => void
@@ -32,7 +33,16 @@ const { bridges, FakeBridge } = vi.hoisted(() => {
   }
   return { bridges, FakeBridge }
 })
-vi.mock('@onagent/bridge', () => ({ AgentBridge: FakeBridge }))
+// defineTool itself is real production logic worth exercising for real
+// (it parses/validates tool args), so re-implement just enough of it here
+// rather than mocking it away — only AgentBridge's networking is faked.
+vi.mock('@onagent/bridge', () => ({
+  AgentBridge: FakeBridge,
+  defineTool: (name: string, parseArgs: (raw: unknown) => unknown, handle: (args: unknown) => unknown) => ({
+    name,
+    handle: (raw: unknown) => handle(parseArgs(raw)),
+  }),
+}))
 
 import { App } from './App.tsx'
 
@@ -130,7 +140,7 @@ describe('consumer chat page', () => {
 
     const user = await openChat()
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '  幾點開門？  ')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
 
     // The backend call is in flight; onagent has not been touched yet.
     await waitFor(() => expect(calls('POST', '/chat')).toHaveLength(1))
@@ -161,7 +171,7 @@ describe('consumer chat page', () => {
       return apiError(404, 'not_found')
     }
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '謝謝')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
     await waitFor(() => expect(bridges[0].prompts).toHaveLength(2))
     expect(bridges).toHaveLength(1)
     expect(JSON.parse(calls('POST', '/chat')[1][1]!.body as string)).toEqual({ conversationId: 'c1', content: '謝謝' })
@@ -174,7 +184,7 @@ describe('consumer chat page', () => {
     }
     const user = await openChat()
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '你好')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('目前無法服務')
     expect(bridges).toHaveLength(0)
@@ -188,7 +198,7 @@ describe('consumer chat page', () => {
     }
     const user = await openChat()
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '你好')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('訊息沒有送出')
     expect(bridges).toHaveLength(0)
     expect(screen.getByPlaceholderText('輸入訊息……')).toBeEnabled()
@@ -201,7 +211,7 @@ describe('consumer chat page', () => {
     }
     const user = await openChat()
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '你好')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
     await waitFor(() => expect(bridges).toHaveLength(1))
 
     bridges[0].opts.onError!({ message: 'inference error: boom' })
@@ -217,7 +227,7 @@ describe('consumer chat page', () => {
     }
     const user = await openChat()
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '你好')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
     await waitFor(() => expect(bridges).toHaveLength(1))
     bridges[0].opts.onQuotaExceeded!({ message: 'quota' })
     expect(await screen.findByRole('alert')).toHaveTextContent('目前無法服務')
@@ -231,6 +241,42 @@ describe('consumer chat page', () => {
     expect(bridges).toHaveLength(0)
   })
 
+  it('renders the split layout with a placeholder side panel when the owner chose it', async () => {
+    handler = () => json({ ...BUSINESS, layout: 'split' })
+    render(<App />)
+    expect(await screen.findByText(/之後可以在這裡放上你的圖片/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '開始對話' })).toBeInTheDocument()
+  })
+
+  it('registers list_sections/read_section tools that call the backend sections API', async () => {
+    handler = (url) => {
+      if (url.endsWith('/public/businesses/shop')) return json(BUSINESS)
+      if (url.endsWith('/sections')) return json({ sections: [{ id: 'hours', title: '營業時間' }] })
+      if (url.endsWith('/sections/hours')) return json({ id: 'hours', title: '營業時間', body: '9-18 點' })
+      return json({ conversationId: 'c1', messageId: 1, content: '你好' })
+    }
+    const user = await openChat()
+    await user.type(screen.getByPlaceholderText('輸入訊息……'), '你好')
+    await user.click(screen.getByRole('button', { name: '送出' }))
+    await waitFor(() => expect(bridges).toHaveLength(1))
+
+    const tools = bridges[0].opts.tools as Array<{ name: string; handle: (args: unknown) => unknown }>
+    const listTool = tools.find((t) => t.name === 'list_sections')!
+    const readTool = tools.find((t) => t.name === 'read_section')!
+    expect(listTool).toBeTruthy()
+    expect(readTool).toBeTruthy()
+
+    await expect(listTool.handle({})).resolves.toEqual({ sections: [{ id: 'hours', title: '營業時間' }] })
+    await expect(readTool.handle({ sectionId: 'hours' })).resolves.toEqual({
+      id: 'hours',
+      title: '營業時間',
+      body: '9-18 點',
+    })
+    expect(calls('GET', '/sections')).toHaveLength(1)
+    expect(calls('GET', '/sections/hours')).toHaveLength(1)
+    expect(() => readTool.handle({})).toThrow()
+  })
+
   it('closes the onagent connection when the page unmounts', async () => {
     handler = (url) => {
       if (url.endsWith('/public/businesses/shop')) return json(BUSINESS)
@@ -240,7 +286,7 @@ describe('consumer chat page', () => {
     const { unmount } = render(<App />)
     await user.click(await screen.findByRole('button', { name: '開始對話' }))
     await user.type(screen.getByPlaceholderText('輸入訊息……'), '你好')
-    await user.click(screen.getByRole('button', { name: '➤' }))
+    await user.click(screen.getByRole('button', { name: '送出' }))
     await waitFor(() => expect(bridges).toHaveLength(1))
     unmount()
     expect(bridges[0].closed).toBe(true)

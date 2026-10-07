@@ -73,7 +73,8 @@ describe('console: owner settings against the backend API', () => {
     it('shows nothing owned by a previous login after logging out and in as someone else', async () => {
       const user = await openApp()
       await screen.findByText('晨光烘焙坊')
-      await user.click(screen.getByRole('button', { name: '登出' }))
+      await user.click(screen.getByRole('button', { name: '帳號選單' }))
+      await user.click(await screen.findByRole('menuitem', { name: '登出' }))
       await screen.findByLabelText('密碼')
       fb.businesses = []
       await user.type(screen.getByLabelText('電子信箱'), 'other@example.com')
@@ -204,7 +205,7 @@ describe('console: owner settings against the backend API', () => {
       const user = await openApp()
       await openBusiness(user, '毛孩美容工作室')
       await screen.findAllByPlaceholderText('在這裡輸入內容……')
-      const preview = screen.getByText('AI 實際會看到的內容預覽').parentElement as HTMLElement
+      const preview = screen.getByText('內容預覽（AI 會依需要查詢各章節，不會一次整段提供）').parentElement as HTMLElement
       expect(within(preview).getByText(/直接用 API 寫入的內容/)).toBeInTheDocument()
     })
 
@@ -219,7 +220,7 @@ describe('console: owner settings against the backend API', () => {
 
       await user.type(hours, '每天 10:00–20:00')
       expect(screen.getByText('有尚未儲存的變更')).toBeInTheDocument()
-      const preview = screen.getByText('AI 實際會看到的內容預覽').parentElement as HTMLElement
+      const preview = screen.getByText('內容預覽（AI 會依需要查詢各章節，不會一次整段提供）').parentElement as HTMLElement
       expect(within(preview).getByText(/【營業時間】/)).toBeInTheDocument()
 
       await user.click(save)
@@ -421,7 +422,8 @@ describe('console: owner settings against the backend API', () => {
   describe('session', () => {
     it('logs out through the backend and returns to the login screen', async () => {
       const user = await openApp()
-      await user.click(screen.getByRole('button', { name: '登出' }))
+      await user.click(screen.getByRole('button', { name: '帳號選單' }))
+      await user.click(await screen.findByRole('menuitem', { name: '登出' }))
       expect(await screen.findByLabelText('密碼')).toBeInTheDocument()
       expect(fb.callsTo('POST', /\/auth\/logout$/)).toHaveLength(1)
     })
@@ -429,7 +431,8 @@ describe('console: owner settings against the backend API', () => {
     it('logs out locally even if the backend call fails', async () => {
       const user = await openApp()
       fb.failNext('POST /auth/logout', 500)
-      await user.click(screen.getByRole('button', { name: '登出' }))
+      await user.click(screen.getByRole('button', { name: '帳號選單' }))
+      await user.click(await screen.findByRole('menuitem', { name: '登出' }))
       expect(await screen.findByLabelText('密碼')).toBeInTheDocument()
     })
 

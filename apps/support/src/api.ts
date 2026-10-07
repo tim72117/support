@@ -10,6 +10,7 @@ export interface PublicBusiness {
   tagline?: string
   mascot?: string
   themeColor?: string
+  layout?: string
   maxMessageLength: number
   chat: {
     available: boolean
@@ -25,6 +26,19 @@ export interface ChatResult {
   conversationId: string
   messageId: number
   content: string
+}
+
+/** One content section's title, without its body — what list_sections answers with. */
+export interface SectionSummary {
+  id: string
+  title: string
+}
+
+/** One content section's full text — what read_section answers with. */
+export interface SectionDetail {
+  id: string
+  title: string
+  body: string
 }
 
 export class ApiError extends Error {
@@ -85,4 +99,18 @@ export function postReply(
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+/**
+ * Backs the onagent `list_sections` tool: the tool handler registered with
+ * @onagent/bridge (see useChat.ts) calls this when onagent's model invokes
+ * the tool, and returns what it gets back as the tool's result.
+ */
+export function fetchSections(slug: string): Promise<{ sections: SectionSummary[] }> {
+  return request(`/public/businesses/${encodeURIComponent(slug)}/sections`)
+}
+
+/** Backs the onagent `read_section` tool, same shape as fetchSections. */
+export function fetchSection(slug: string, sectionId: string): Promise<SectionDetail> {
+  return request(`/public/businesses/${encodeURIComponent(slug)}/sections/${encodeURIComponent(sectionId)}`)
 }

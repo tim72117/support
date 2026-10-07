@@ -33,11 +33,22 @@ const (
 	StatusPastDue  = "past_due"
 	StatusCanceled = "canceled" // user cancelled; paid access runs to current_period_end
 	StatusExpired  = "expired"  // access ended; back on the free tier
+	// StatusTrialing is a running free trial (see StartTrial): no card was
+	// collected and nothing is ever charged for it. When current_period_end
+	// passes, RenewDue's "ended" sweep (the same one that handles a
+	// cancelled subscription running out) drops the owner to the free tier,
+	// same as StatusExpired; the owner must call Subscribe (which does
+	// collect a card) to get paid access again.
+	StatusTrialing = "trialing"
 
 	// maxRenewalAttempts is how many declined renewal charges are tolerated
 	// before the owner is dropped back to the free tier.
 	maxRenewalAttempts = 3
 	retryAfterDecline  = 24 * time.Hour
+
+	// trialDays is how long a candidate trial (StartTrial) runs before it
+	// must be converted to a paid subscription by the owner.
+	trialDays = 7
 )
 
 var (
@@ -74,6 +85,11 @@ type Profile struct {
 	CardLastFour     string    `json:"cardLastFour"`
 	CurrentPeriodEnd time.Time `json:"currentPeriodEnd"`
 	FailedAttempts   int       `json:"failedAttempts"`
+	// TrialExpired is true once a StatusTrialing profile's current period
+	// has passed. The frontend uses this to send the owner to the normal
+	// (card-collecting) subscribe flow instead of treating them as still
+	// on an active trial; nothing here auto-charges or auto-converts them.
+	TrialExpired bool `json:"trialExpired"`
 }
 
 type profileRow struct {
@@ -93,10 +109,11 @@ type profileRow struct {
 
 func (profileRow) TableName() string { return "billing_profiles" }
 
-func (r profileRow) view() *Profile {
+func (r profileRow) view(now time.Time) *Profile {
 	return &Profile{
 		Tier: r.Tier, Status: r.Status, CardLastFour: r.CardLastFour,
 		CurrentPeriodEnd: r.CurrentPeriodEnd, FailedAttempts: r.FailedAttempts,
+		TrialExpired: r.Status == StatusTrialing && !r.CurrentPeriodEnd.After(now),
 	}
 }
 
@@ -218,12 +235,32 @@ func (s *Service) Subscribe(ctx context.Context, userID int64, tier quota.Tier, 
 		s.log.Error("CHARGED but could not activate plan", "order", pay.OrderNumber, "rec_trade_id", res.RecTradeID, "err", err)
 		return nil, fmt.Errorf("%w: %v", ErrActivationFailed, err)
 	}
-	return row.view(), nil
+	return row.view(now), nil
 }
 
 // Cancel stops future renewals. The owner keeps the paid tier until the end
 // of the period already paid for; RenewDue downgrades them after that.
+//
+// A running free trial (StatusTrialing) is cancellable the same way, but
+// since nothing was ever paid for it there is no "period already paid for"
+// to ride out: cancelling it drops the owner to the free tier immediately
+// instead of waiting for the trial's natural end.
 func (s *Service) Cancel(ctx context.Context, userID int64) (*Profile, error) {
+	var cur profileRow
+	if err := s.db.WithContext(ctx).Where("user_id = ?", userID).Take(&cur).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNoSubscription
+		}
+		return nil, fmt.Errorf("billing: load profile: %w", err)
+	}
+
+	if cur.Status == StatusTrialing {
+		if err := s.expire(ctx, userID); err != nil {
+			return nil, fmt.Errorf("billing: cancel trial: %w", err)
+		}
+		return s.Get(ctx, userID)
+	}
+
 	res := s.db.WithContext(ctx).Model(&profileRow{}).
 		Where("user_id = ? AND status IN ?", userID, []string{StatusActive, StatusPastDue}).
 		Updates(map[string]any{"status": StatusCanceled, "next_charge_at": nil, "updated_at": s.now()})
@@ -245,11 +282,79 @@ func (s *Service) Get(ctx context.Context, userID int64) (*Profile, error) {
 		}
 		return nil, fmt.Errorf("billing: load profile: %w", err)
 	}
-	return row.view(), nil
+	return row.view(s.now()), nil
+}
+
+// ListProfiles returns every owner's billing profile that exists (an owner
+// with no billing_profiles row at all, e.g. one who never started a trial
+// or subscription, simply has no entry here), keyed by user id. Read-only,
+// for the platform-admin back office (internal/admin) to show alongside
+// quota.ListUsers' tier/usage per owner — kept as a separate call rather
+// than folded into ListUsers because billing and quota are deliberately
+// separate tables/packages (see this file's package doc comment).
+func (s *Service) ListProfiles(ctx context.Context) (map[int64]*Profile, error) {
+	if s == nil {
+		return nil, fmt.Errorf("billing: service is disabled")
+	}
+	var rows []profileRow
+	if err := s.db.WithContext(ctx).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("billing: list profiles: %w", err)
+	}
+	now := s.now()
+	out := make(map[int64]*Profile, len(rows))
+	for _, r := range rows {
+		out[r.UserID] = r.view(now)
+	}
+	return out, nil
+}
+
+// StartTrial gives userID a 7-day free trial with no card collected and
+// nothing charged: billing_profiles gets a StatusTrialing row whose
+// current_period_end is now+trialDays and whose next_charge_at is NULL, so
+// RenewDue's due-for-renewal query (which additionally requires a non-empty
+// card_token) never picks it up — there is no renewal or auto-conversion to
+// collect money for a trial. Once the period passes, RenewDue's ended sweep
+// (below) drops the owner to the free tier; getting paid access back means
+// calling Subscribe, which does collect a card, same as any other new
+// subscriber.
+//
+// Blocked the same way Subscribe is: an owner with any current or
+// recently-ended paid/trial standing cannot start a second trial by calling
+// this again.
+func (s *Service) StartTrial(ctx context.Context, userID int64) (*Profile, error) {
+	now := s.now()
+	var cur profileRow
+	switch err := s.db.WithContext(ctx).Where("user_id = ?", userID).Take(&cur).Error; {
+	case err == nil:
+		blocked := cur.Status == StatusActive || cur.Status == StatusPastDue || cur.Status == StatusTrialing ||
+			(cur.Status == StatusCanceled && cur.CurrentPeriodEnd.After(now))
+		if blocked {
+			return nil, ErrAlreadySubscribed
+		}
+	case !errors.Is(err, gorm.ErrRecordNotFound):
+		return nil, fmt.Errorf("billing: load profile: %w", err)
+	}
+
+	end := now.AddDate(0, 0, trialDays)
+	row := profileRow{
+		UserID: userID, Tier: string(quota.TierCandidateTrial), Status: StatusTrialing,
+		AnchorAt: now, PeriodsPaid: 0, CurrentPeriodEnd: end, NextChargeAt: nil, UpdatedAt: now,
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error; err != nil {
+			return err
+		}
+		return s.quota.SetTierTx(ctx, tx, userID, quota.TierCandidateTrial)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("billing: start trial: %w", err)
+	}
+	return row.view(now), nil
 }
 
 // RenewDue charges every profile whose next_charge_at has passed, and drops
-// to the free tier any cancelled profile whose paid period has ended.
+// to the free tier any cancelled subscription or lapsed trial whose period
+// has ended.
 // Safe to run from several processes at once: each profile is claimed by an
 // atomic update of next_charge_at before any money is requested.
 func (s *Service) RenewDue(ctx context.Context) error {
@@ -268,13 +373,13 @@ func (s *Service) RenewDue(ctx context.Context) error {
 
 	var ended []profileRow
 	if err := s.db.WithContext(ctx).
-		Where("status = ? AND current_period_end <= ?", StatusCanceled, now).
+		Where("status IN ? AND current_period_end <= ?", []string{StatusCanceled, StatusTrialing}, now).
 		Limit(50).Find(&ended).Error; err != nil {
 		return fmt.Errorf("billing: find ended: %w", err)
 	}
 	for _, p := range ended {
 		if err := s.expire(ctx, p.UserID); err != nil {
-			s.log.Error("expire canceled", "user", p.UserID, "err", err)
+			s.log.Error("expire canceled/trial", "user", p.UserID, "err", err)
 		}
 	}
 	return nil
@@ -340,7 +445,9 @@ func (s *Service) renewOne(ctx context.Context, p profileRow) error {
 	}).Error
 }
 
-// expire ends paid access: profile -> expired, quota tier -> free.
+// expire ends paid or trial access: profile -> expired, quota tier -> free.
+// Used both for a cancelled subscription's period running out, a free
+// trial's period running out, and an owner cancelling a trial early.
 func (s *Service) expire(ctx context.Context, userID int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&profileRow{}).Where("user_id = ?", userID).Updates(map[string]any{

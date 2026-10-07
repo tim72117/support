@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AgentBridge } from '@onagent/bridge'
-import { ApiError, postChat, postReply, type ChatResult, type PublicBusiness } from './api.ts'
+import { AgentBridge, defineTool } from '@onagent/bridge'
+import { ApiError, fetchSection, fetchSections, postChat, postReply, type ChatResult, type PublicBusiness } from './api.ts'
 
 export interface ChatMessage {
   id: string
@@ -72,6 +72,41 @@ export function useChat(business: PublicBusiness, greeting: string) {
     [finishTurn],
   )
 
+  // Tool handlers for onagent's list_sections / read_section (see
+  // backend/onagent-tools/*.yaml for their definitions as registered with
+  // onagent, and backend/internal/public/public.go for the two endpoints
+  // these call). Tool execution genuinely happens here, in the visitor's
+  // browser — onagent's backend only relays the call over the WebSocket —
+  // so the business's content never has to pass through onagent as a system
+  // prompt; it's fetched from ai-support's own backend on demand, scoped by
+  // this page's slug exactly like every other /public/* call.
+  //
+  // parseArgs intentionally returns {} / the sectionId with no further
+  // validation beyond "is it a string": the backend endpoint is the source
+  // of truth for whether an id exists, and a bad id just becomes a normal
+  // 404 surfaced as a tool error, same as any other handler failure.
+  const makeTools = useCallback(
+    () => [
+      defineTool(
+        'list_sections',
+        () => ({}),
+        () => fetchSections(slug),
+      ),
+      defineTool(
+        'read_section',
+        (raw: unknown) => {
+          const sectionId = (raw as { sectionId?: unknown } | null)?.sectionId
+          if (typeof sectionId !== 'string' || !sectionId) {
+            throw new Error('sectionId is required')
+          }
+          return { sectionId }
+        },
+        ({ sectionId }) => fetchSection(slug, sectionId),
+      ),
+    ],
+    [slug],
+  )
+
   const ensureBridge = useCallback((): AgentBridge => {
     if (bridgeRef.current) return bridgeRef.current
     const { wsUrl, appId, apiKey } = business.chat
@@ -80,7 +115,7 @@ export function useChat(business: PublicBusiness, greeting: string) {
       appId: appId!,
       apiKey,
       lazyConnect: true,
-      tools: [],
+      tools: makeTools(),
       onAssistantMessage: (text) => {
         const pending = pendingRef.current
         addMessage('assistant', text)
@@ -101,7 +136,7 @@ export function useChat(business: PublicBusiness, greeting: string) {
     })
     bridgeRef.current = bridge
     return bridge
-  }, [business.chat, slug, addMessage, finishTurn, failTurn])
+  }, [business.chat, makeTools, slug, addMessage, finishTurn, failTurn])
 
   const start = useCallback(() => {
     if (startedRef.current) return

@@ -27,6 +27,8 @@
   --shadow-card: 0 2px 6px rgba(44, 42, 40, 0.05), 0 8px 24px rgba(44, 42, 40, 0.06);
   --shadow-pop: 0 12px 32px rgba(44, 42, 40, 0.16);
 
+  --success: #2e9e5b;
+
   color-scheme: light;
 }
 
@@ -38,6 +40,12 @@ html,
 body,
 #root {
   height: 100%;
+  /* dvh accounts for the mobile browser chrome (and, with the index.html
+     viewport's interactive-widget=resizes-content, the on-screen keyboard)
+     shrinking the viewport — 100% alone leaves the composer sitting under
+     the keyboard on iOS/Android instead of shrinking to stay visible.
+     Falls back to the 100% above on browsers that don't support dvh. */
+  height: 100dvh;
 }
 
 body {

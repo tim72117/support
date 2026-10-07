@@ -57,25 +57,6 @@
   gap: var(--space-4);
 }
 
-.ownerName {
-  font-size: 14px;
-  color: var(--ink-dim);
-}
-
-.logout {
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--ink-dim);
-  border-radius: var(--radius-pill);
-  padding: var(--space-2) var(--space-4);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.logout:hover {
-  background: var(--bg-sunken);
-}
-
 .main {
   flex: 1;
   padding: var(--space-8) var(--space-6);

@@ -195,6 +195,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'businesses' AND column_name = 'theme_color') THEN
         ALTER TABLE businesses ADD COLUMN theme_color TEXT NOT NULL DEFAULT '#FF8A5B';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'businesses' AND column_name = 'layout') THEN
+        ALTER TABLE businesses ADD COLUMN layout TEXT NOT NULL DEFAULT 'center';
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'business_content' AND column_name = 'sections') THEN
         ALTER TABLE business_content ADD COLUMN sections TEXT;
     END IF;

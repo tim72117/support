@@ -1,0 +1,34 @@
+# onagent tool definition for list_sections.
+#
+# Push with:
+#   onagent tool create <appId> backend/onagent-tools/list_sections.yaml
+#
+# Execution model: onagent's inference runs on onagent's own backend, but the
+# tool call itself is executed in the VISITOR'S BROWSER, not here — the
+# handler is registered with @onagent/bridge in apps/support/src/useChat.ts
+# (see AgentBridgeOptions.tools in
+# apps/support/node_modules/@onagent/bridge/dist/client.d.ts). That handler
+# calls this ai-support backend's own
+#   GET /public/businesses/{slug}/sections
+# (see backend/internal/public/public.go) to answer the call. This file only
+# registers the tool's existence/shape with onagent so its model knows when
+# and how to call it; it does not run any code itself.
+#
+# No parameters: each onagent app here corresponds to exactly one business
+# (see backend/internal/console/console.go's syncOnagent, which provisions
+# one onagent app per business), so there is nothing to disambiguate — the
+# browser's handler already knows which business's slug to call.
+name: list_sections
+description: >-
+  List the titles of the content sections this business owner has filled in
+  (e.g. business hours, contact info, products/services, return policy,
+  FAQ). Does NOT return the section bodies — call this first to see what is
+  available, then call read_section with a section's id to get its full
+  text. Call this before answering any question about the business so you
+  know what information actually exists; if a section you need is not
+  listed, say you are not sure and suggest contacting the business directly
+  instead of guessing.
+parameters:
+  type: object
+  properties: {}
+kind: query

@@ -1,0 +1,151 @@
+name: Deploy to Cloud Run
+
+# Tag push (v*) 自動觸發 + workflow_dispatch 手動觸發(含 skip_build 選項,
+# 只重新指向既有 image 不重新 build),照抄
+# /Users/caitingyu/Documents/tripace/.github/workflows/deploy-cloudrun.yml
+# 的既有模式——理由同樣適用於這個專案:打 tag 當成「這個版本已經確認
+# 要上線」的訊號,不需要 push 到 main 就自動部署(尤其是這個專案也有資料庫
+# migration,同一套風險)。
+#
+# 跟 tripace 版本的差異:這裡只有一個前端需要 build-time 環境變數
+# (apps/console、apps/support 的 VITE_API_BASE / VITE_SUPPORT_URL,見
+# backend/Dockerfile console-build/support-build 兩個階段的說明),
+# apps/landing 完全不需要(它的 console/api 連結是用 URL query string
+# 在瀏覽器執行期決定,見 apps/landing/assets/site.js)。也沒有 Google Maps
+# API key、onagent 前端 apiKey 這類 tripace 專屬的東西。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      skip_build:
+        description: '只部署不重新 build（使用現有 latest image）'
+        type: boolean
+        default: false
+
+env:
+  GCP_PROJECT_ID: "wenbi-prod"
+  CLOUD_RUN_SERVICE: "ai-support-server"
+  CLOUD_RUN_REGION: "asia-east1"
+  IMAGE: "asia-east1-docker.pkg.dev/wenbi-prod/cloud-run-source-deploy/ai-support-server"
+  # 這個服務對外的正式網域。見下方 Deploy 步驟的 ALLOWED_ORIGIN/
+  # PUBLIC_ALLOWED_ORIGIN/CONSOLE_URL ——因為三個前端現在合併進同一個
+  # Cloud Run 服務(見 backend/Dockerfile、cmd/server/static_*.go),這裡
+  # 全部指向同一個網域下的不同路徑前綴("/"、"/app/"、"/support/"),
+  # 不再是三個分開的 origin。
+  SITE_BASE_URL: "https://ai.shuttle.tools"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      # skip_build 只在 workflow_dispatch 觸發時才可能是 true(tag push
+      # 觸發沒有這個 input,github.event.inputs.skip_build 會是空字串,
+      # != 'true' 成立,以下步驟正常執行)。
+      - name: Configure Docker for Artifact Registry
+        if: github.event.inputs.skip_build != 'true'
+        run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        if: github.event.inputs.skip_build != 'true'
+        run: |
+          docker build \
+            -f backend/Dockerfile \
+            --build-arg VITE_API_BASE="${{ env.SITE_BASE_URL }}" \
+            --build-arg VITE_SUPPORT_URL="${{ env.SITE_BASE_URL }}" \
+            -t ${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.IMAGE }}:latest \
+            .
+
+      - name: Push image
+        if: github.event.inputs.skip_build != 'true'
+        run: |
+          docker push ${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.IMAGE }}:latest
+
+      # skip_build=true 時本次沒有 build 過,${{ github.sha }} 這個 tag
+      # 根本不存在於 Artifact Registry,故改用 :latest(見上方 Push image
+      # 步驟,只要之前任何一次完整 build+deploy 跑過,:latest 就會是
+      # 那次的內容)。
+      - name: Deploy to Cloud Run
+        run: |
+          # 把 --update-env-vars/--update-secrets 各自要帶的清單拆成 shell
+          # 變數、一行一項組裝——純粹是可讀性/之後增刪項目時 diff 更乾淨
+          # 的考量,傳給 gcloud 的實際值跟原本逗號串接寫死在同一行完全
+          # 等價,不影響部署行為本身。
+          #
+          # 非機密設定值,直接當一般環境變數(見 backend/.env.example 的
+          # 完整說明,對照哪些值本來就設計成可以公開/不可公開)：
+          ENV_VARS="COOKIE_SECURE=true"
+          ENV_VARS="${ENV_VARS},QUOTA_ENABLED=true"
+          # 三個前端現在合併進同一個 Cloud Run 服務,ALLOWED_ORIGIN(console
+          # API 的 CORS 白名單)/PUBLIC_ALLOWED_ORIGIN(consumer 頁 /public/*
+          # 的 CORS 白名單)/CONSOLE_URL(Google 登入成功後導回的網址)都
+          # 指向同一個網域,只是路徑不同。
+          ENV_VARS="${ENV_VARS},ALLOWED_ORIGIN=${{ env.SITE_BASE_URL }}"
+          ENV_VARS="${ENV_VARS},PUBLIC_ALLOWED_ORIGIN=${{ env.SITE_BASE_URL }}"
+          ENV_VARS="${ENV_VARS},PUBLIC_TRUST_PROXY=true"
+          ENV_VARS="${ENV_VARS},CONSOLE_URL=${{ env.SITE_BASE_URL }}/app"
+          ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_REDIRECT_URL=${{ env.SITE_BASE_URL }}/auth/google/callback"
+          # TAPPAY_APP_ID / TAPPAY_APP_KEY:瀏覽器端 TPDirect.setupSDK 用的
+          # 憑證,設計上本來就會出現在前端網路請求裡,不是機密(見
+          # backend/.env.example 的說明),故當一般環境變數,不走 Secret
+          # Manager。正式上線收真錢前記得把 TAPPAY_ENV 改成 production
+          # (需先通過 TapPay 特店審核)。
+          ENV_VARS="${ENV_VARS},TAPPAY_APP_ID=${{ vars.TAPPAY_APP_ID }}"
+          ENV_VARS="${ENV_VARS},TAPPAY_APP_KEY=${{ vars.TAPPAY_APP_KEY }}"
+          ENV_VARS="${ENV_VARS},TAPPAY_ENV=sandbox"
+          # GOOGLE_OAUTH_CLIENT_ID:OAuth 用戶端 ID,設計上本來就會出現在
+          # 前端/redirect URL 裡,不是機密(真正的機密是 CLIENT_SECRET,見
+          # 下面 SECRETS)。
+          ENV_VARS="${ENV_VARS},GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }}"
+          # onagent 串接:BASE_URL 不是機密(真正的機密是下面 SECRETS 的
+          # ONAGENT_TOKEN)。
+          ENV_VARS="${ENV_VARS},ONAGENT_BASE_URL=${{ vars.ONAGENT_BASE_URL }}"
+
+          # 機密資料,一律從 Secret Manager 注入,絕不寫進這個檔案或 log：
+          SECRETS="DATABASE_URL=DATABASE_URL:latest"
+          SECRETS="${SECRETS},GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest"
+          SECRETS="${SECRETS},TAPPAY_PARTNER_KEY=TAPPAY_PARTNER_KEY:latest"
+          SECRETS="${SECRETS},TAPPAY_MERCHANT_ID=TAPPAY_MERCHANT_ID:latest"
+          SECRETS="${SECRETS},ONAGENT_TOKEN=ONAGENT_TOKEN:latest"
+
+          # min/max-instances 刻意壓到最低，把這個服務的雲端費用控制在
+          # 接近零的範圍：min=0 是 Cloud Run 預設的 scale-to-zero（沒流量
+          # 時不跑任何實例、不計費，代價是冷啟動延遲）；max=1 把並發實例
+          # 數鎖死在 1，避免流量暴衝（或被濫用攻擊）時無限擴展、產生意外
+          # 高額帳單——流量真的成長到需要更高上限時，再手動調整。
+          gcloud run deploy ${{ env.CLOUD_RUN_SERVICE }} \
+            --project=${{ env.GCP_PROJECT_ID }} \
+            --image=${{ env.IMAGE }}:${{ github.event.inputs.skip_build == 'true' && 'latest' || github.sha }} \
+            --region=${{ env.CLOUD_RUN_REGION }} \
+            --allow-unauthenticated \
+            --min-instances=0 \
+            --max-instances=1 \
+            --update-env-vars="${ENV_VARS}" \
+            --update-secrets="${SECRETS}" \
+            --quiet
+
+      - name: Show Cloud Run URL
+        run: |
+          URL=$(gcloud run services describe ${{ env.CLOUD_RUN_SERVICE }} \
+            --project=${{ env.GCP_PROJECT_ID }} \
+            --region ${{ env.CLOUD_RUN_REGION }} \
+            --format 'value(status.url)')
+          echo "### 部署完成" >> "$GITHUB_STEP_SUMMARY"
+          echo "URL: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL"

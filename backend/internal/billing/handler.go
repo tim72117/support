@@ -32,6 +32,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /console/billing/plans", h.plans)
 	mux.HandleFunc("GET /console/billing/subscription", h.withAuth(h.subscription))
 	mux.HandleFunc("POST /console/billing/subscribe", h.withAuth(h.subscribe))
+	mux.HandleFunc("POST /console/billing/start-trial", h.withAuth(h.startTrial))
 	mux.HandleFunc("POST /console/billing/cancel", h.withAuth(h.cancel))
 }
 
@@ -99,6 +100,22 @@ func (h *Handler) subscribe(w http.ResponseWriter, r *http.Request, user *sessio
 	p, err := h.Service.Subscribe(r.Context(), user.ID, quota.Tier(body.Tier), body.Prime, tappay.Cardholder{
 		Name: body.Cardholder.Name, Email: body.Cardholder.Email, PhoneNumber: body.Cardholder.PhoneNumber,
 	})
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// startTrial begins a 7-day free trial for the logged-in owner. Unlike
+// subscribe, it takes no body: no card is collected and nothing is charged,
+// so there is no prime/cardholder to send.
+func (h *Handler) startTrial(w http.ResponseWriter, r *http.Request, user *session.User) {
+	if h.Service == nil {
+		http.Error(w, "billing is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	p, err := h.Service.StartTrial(r.Context(), user.ID)
 	if err != nil {
 		h.fail(w, err)
 		return

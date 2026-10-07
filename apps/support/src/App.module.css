@@ -97,6 +97,7 @@
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 15px;
+  background: color-mix(in srgb, var(--theme-color) 78%, black);
   color: white;
   cursor: pointer;
   transition: transform 0.1s ease, filter 0.15s ease;
@@ -198,6 +199,12 @@
 }
 
 .bubbleUser {
+  /* The business's own theme color is picked freely in the console (see
+     apps/console's THEME_COLORS) and several of those options fail WCAG AA
+     for white text (as low as ~1.7:1 — e.g. the teal/yellow options). Darken
+     it at paint time via the --theme-color custom property the parent sets
+     inline, rather than trusting every picked color to already be readable. */
+  background: color-mix(in srgb, var(--theme-color) 78%, black);
   color: white;
   border-bottom-right-radius: 4px;
 }
@@ -250,26 +257,41 @@
   border-radius: var(--radius-pill);
   border: 1.5px solid var(--border-strong);
   background: var(--bg);
-  font-size: 14px;
+  /* 16px, not 14px: iOS Safari auto-zooms the whole page on focus for any
+     input/textarea under 16px, and doesn't zoom back out on blur. */
+  font-size: 16px;
   outline: none;
+  resize: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .composerInput:focus {
-  border-color: var(--border-strong);
+  border-color: var(--theme-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-color) 25%, transparent);
 }
 
 .sendButton {
   border: none;
   border-radius: 50%;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--theme-color) 78%, black);
   color: white;
   font-size: 16px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.sendButton:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.sendButton:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .sendButton:disabled {
@@ -281,7 +303,107 @@
   text-align: center;
   font-size: 12px;
   color: var(--ink-faint);
-  padding-bottom: var(--space-2);
+  /* env() resolves to 0 without viewport-fit=cover (set in index.html) or on
+     devices without a home indicator — this just keeps the footer clear of
+     it on iPhones with one. */
+  padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
+}
+
+/* --- split layout (left blank panel, right chat) --- */
+
+.splitPage {
+  min-height: 100%;
+  display: flex;
+  flex-direction: row;
+}
+
+.splitSide {
+  flex: 0 0 38%;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+.splitSideInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  max-width: 320px;
+}
+
+.splitBusinessName {
+  font-size: 20px;
+  color: var(--ink);
+  margin-top: var(--space-2);
+}
+
+.splitTagline {
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+
+.splitSidePlaceholder {
+  margin-top: var(--space-4);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+.splitMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+.splitMain .welcomeCard,
+.splitMain .chatPanel {
+  margin-top: 0;
+}
+
+.splitMain .chatPanel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Below this width, two side-by-side columns leave the chat panel too
+   narrow to use comfortably, so split falls back to a single stacked
+   column: the blank panel becomes a short strip on top. */
+@media (max-width: 720px) {
+  .splitPage {
+    flex-direction: column;
+  }
+
+  .splitSide {
+    flex: 0 0 auto;
+    max-width: none;
+    padding: var(--space-5) var(--space-5) var(--space-4);
+  }
+
+  .splitSideInner {
+    flex-direction: row;
+    max-width: none;
+    text-align: left;
+    gap: var(--space-3);
+  }
+
+  .splitBusinessName {
+    margin-top: 0;
+    font-size: 17px;
+  }
+
+  .splitSidePlaceholder {
+    display: none;
+  }
+
+  .splitMain {
+    padding: var(--space-4);
+  }
 }
 
 .notFound {

@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import styles from './BusinessEditor.module.css'
 import { useBackend, type SyncStatus } from './BackendContext.tsx'
+import { ConversationsTab } from './ConversationsTab.tsx'
 import { Mascot } from './Mascot.tsx'
 import {
   buildContentText,
+  LAYOUT_LABELS,
   MASCOT_LABELS,
   THEME_COLORS,
   type Business,
   type BusinessPatch,
   type ContentSection,
+  type LayoutId,
   type MascotId,
 } from './model.ts'
 
@@ -24,7 +27,7 @@ interface BusinessEditorProps {
   onBack: () => void
 }
 
-type Tab = 'content' | 'branding'
+type Tab = 'content' | 'conversations' | 'branding'
 type ContentLoad = 'loading' | 'ready' | 'error'
 
 interface LookDraft {
@@ -32,10 +35,11 @@ interface LookDraft {
   tagline: string
   mascot: MascotId
   themeColor: string
+  layout: LayoutId
 }
 
 function lookOf(b: Business): LookDraft {
-  return { name: b.name, tagline: b.tagline, mascot: b.mascot, themeColor: b.themeColor }
+  return { name: b.name, tagline: b.tagline, mascot: b.mascot, themeColor: b.themeColor, layout: b.layout }
 }
 
 export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
@@ -98,6 +102,7 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
   if (trimmedTagline !== business.tagline) patch.tagline = trimmedTagline
   if (look.mascot !== business.mascot) patch.mascot = look.mascot
   if (look.themeColor !== business.themeColor) patch.themeColor = look.themeColor
+  if (look.layout !== business.layout) patch.layout = look.layout
   const lookDirty = Object.keys(patch).length > 0
   const contentDirty = contentLoad === 'ready' && JSON.stringify(sections) !== JSON.stringify(savedSections)
   const isDirty = lookDirty || contentDirty
@@ -184,12 +189,21 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
         </button>
         <button
           type="button"
+          className={`${styles.tab} ${tab === 'conversations' ? styles.tabActive : ''}`}
+          onClick={() => setTab('conversations')}
+        >
+          對話紀錄
+        </button>
+        <button
+          type="button"
           className={`${styles.tab} ${tab === 'branding' ? styles.tabActive : ''}`}
           onClick={() => setTab('branding')}
         >
           形象設定
         </button>
       </div>
+
+      {tab === 'conversations' && <ConversationsTab businessId={businessId} />}
 
       {tab === 'content' && contentLoad === 'loading' && <div className={styles.loadingBox}>載入內容中…</div>}
       {tab === 'content' && contentLoad === 'error' && (
@@ -289,7 +303,7 @@ function ContentTab({
 
       <div style={{ marginTop: 'var(--space-5)' }}>
         <div className={styles.previewCard}>
-          <span className={styles.previewLabel}>AI 實際會看到的內容預覽</span>
+          <span className={styles.previewLabel}>內容預覽（AI 會依需要查詢各章節，不會一次整段提供）</span>
           {previewText ? (
             <div className={styles.previewText}>{previewText}</div>
           ) : (
@@ -342,7 +356,7 @@ function BrandingTab({
               onClick={() => onChange({ mascot: id })}
               title={MASCOT_LABELS[id]}
             >
-              <Mascot id={id} color={draft.themeColor} size={32} />
+              <Mascot id={id} color={draft.themeColor} size={40} />
             </button>
           ))}
         </div>
@@ -360,6 +374,23 @@ function BrandingTab({
               onClick={() => onChange({ themeColor: color })}
               aria-label={color}
             />
+          ))}
+        </div>
+      </div>
+
+      <div className={styles.brandingCard}>
+        <span className={styles.sectionTitle}>版面排版</span>
+        <span className={styles.sectionHint}>決定顧客打開對話頁面時看到的版面配置。</span>
+        <div className={styles.layoutPicker}>
+          {(Object.keys(LAYOUT_LABELS) as LayoutId[]).map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={`${styles.layoutOption} ${draft.layout === id ? styles.layoutOptionSelected : ''}`}
+              onClick={() => onChange({ layout: id })}
+            >
+              {LAYOUT_LABELS[id]}
+            </button>
           ))}
         </div>
       </div>

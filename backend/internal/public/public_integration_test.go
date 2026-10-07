@@ -125,14 +125,21 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { gdb.Exec("DELETE FROM businesses WHERE id = ?", created.ID) })
 
-	// 2. saving content pushes it as the thought.
-	rec = consoleDo(owner.ID, "PUT", fmt.Sprintf("/console/businesses/%d/content", created.ID), `{"Content":"週一公休，其餘 9-18 點。"}`)
+	// 2. saving content pushes a short briefing (not the content itself) as
+	// the thought; the actual content text is only reachable through the
+	// sections tool-backing API below.
+	sectionsBody := `[{"id":"hours","title":"營業時間","body":"週一公休，其餘 9-18 點。"},{"id":"other","title":"其他","body":""}]`
+	rec = consoleDo(owner.ID, "PUT", fmt.Sprintf("/console/businesses/%d/content", created.ID),
+		fmt.Sprintf(`{"Content":"週一公休，其餘 9-18 點。","Sections":%s}`, sectionsBody))
 	if rec.Code != 204 || rec.Header().Get("X-Onagent-Sync") != "ok" {
 		t.Fatalf("put content: %d %s", rec.Code, rec.Body.String())
 	}
 	mu.Lock()
-	if !strings.Contains(thought, "週一公休") || !strings.Contains(thought, "整合測試店") {
+	if !strings.Contains(thought, "整合測試店") || !strings.Contains(thought, "list_sections") || !strings.Contains(thought, "read_section") {
 		t.Fatalf("thought = %q", thought)
+	}
+	if strings.Contains(thought, "週一公休") {
+		t.Fatalf("thought must not embed section content: %q", thought)
 	}
 	creates := 0
 	for _, c := range calls {
@@ -160,6 +167,27 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	rec = pubDo("GET", "/public/businesses/"+slug, "")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "browser-key-") || !strings.Contains(rec.Body.String(), `"wsUrl":"ws://`) {
 		t.Fatalf("get business: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 2b. list_sections/read_section tool-backing API: only the non-empty
+	// "hours" section shows up (the empty "other" section was filtered out),
+	// list_sections omits the body, and read_section returns it in full.
+	rec = pubDo("GET", "/public/businesses/"+slug+"/sections", "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "週一公休") || !strings.Contains(rec.Body.String(), "營業時間") {
+		t.Fatalf("list sections: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"id":"other"`) {
+		t.Fatalf("empty section must not be listed: %s", rec.Body.String())
+	}
+	rec = pubDo("GET", "/public/businesses/"+slug+"/sections/hours", "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "週一公休") {
+		t.Fatalf("read section: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = pubDo("GET", "/public/businesses/"+slug+"/sections/nope", ""); rec.Code != 404 {
+		t.Fatalf("unknown section: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = pubDo("GET", "/public/businesses/"+slug+"/sections/other", ""); rec.Code != 404 {
+		t.Fatalf("empty section read: %d %s", rec.Code, rec.Body.String())
 	}
 
 	rec = pubDo("POST", "/public/businesses/"+slug+"/chat", `{"content":"幾點開門？"}`)

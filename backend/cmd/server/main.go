@@ -18,6 +18,8 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"github.com/tim72117/ai-support/internal/admin"
+	"github.com/tim72117/ai-support/internal/adminauth"
 	"github.com/tim72117/ai-support/internal/billing"
 	"github.com/tim72117/ai-support/internal/business"
 	"github.com/tim72117/ai-support/internal/console"
@@ -38,7 +40,10 @@ Runs the ai-support backend: business-owner accounts and the console API.
 Configured entirely via environment variables (optionally loaded from a
 .env file in the working directory):
 
-  ADDR                       Listen address (default ":8082")
+  ADDR                       Listen address (default ":8082"). Cloud Run
+                              instead injects PORT (just the port number);
+                              if ADDR is unset and PORT is set, this
+                              listens on ":$PORT".
   DATABASE_URL               Postgres DSN
   ALLOWED_ORIGIN             Comma-separated origins allowed to call
                               /console/* and /auth/* with credentials
@@ -75,6 +80,14 @@ Configured entirely via environment variables (optionally loaded from a
                               (default: ONAGENT_BASE_URL with ws(s):// and /ws).
   ONAGENT_APP_ID_PREFIX      Optional prefix for generated onagent app ids
                               (default "aisupport-").
+  ADMIN_EMAILS               Comma-separated emails allowed to use the
+                              platform-admin back office (/admin/api/*,
+                              apps/admin). Not a separate account system: an
+                              admin signs in through the normal /auth/login
+                              like any business owner, and this just checks
+                              whether that account's email is in the list.
+                              Unset or empty disables the admin API for
+                              everyone (every /admin/api/* route 404s).
 `
 
 func main() {
@@ -168,6 +181,20 @@ func main() {
 	}
 	billingHandler := billing.NewHandler(billingSvc, sessionStore, tpCfg, log)
 
+	// Platform-admin back office. See adminauth's package doc comment for
+	// why this is deliberately not a separate account/login system: an
+	// admin is just a normal session (internal/session) whose email is in
+	// ADMIN_EMAILS. Mounted unconditionally (an empty allowlist just means
+	// nobody's email ever matches, so every /admin/api/* route 404s — see
+	// admin.Handler.withAdmin) rather than only when the env var is set, so
+	// there's no separate "is the admin API compiled in" branch to reason
+	// about in addition to "who's on the list".
+	adminAllowlist := adminauth.New(os.Getenv("ADMIN_EMAILS"))
+	if adminAllowlist.Empty() {
+		log.Warn("no ADMIN_EMAILS set; the admin back office is mounted but nobody can use it")
+	}
+	adminHandler := admin.NewHandler(sessionStore, adminAllowlist, businessStore, quotaSvc, billingSvc, log)
+
 	siteOrigins := strings.Split(os.Getenv("ALLOWED_ORIGIN"), ",")
 	if os.Getenv("ALLOWED_ORIGIN") == "" {
 		siteOrigins = nil
@@ -189,7 +216,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mountCredentialedRoutes(mux, multiRegistrar{consoleHandler, billingHandler}, allowlistChecker(siteOrigins), googleAuthHandler)
+	mountCredentialedRoutes(mux, multiRegistrar{consoleHandler, billingHandler, adminHandler}, allowlistChecker(siteOrigins), googleAuthHandler)
 	mountPublicRoutes(mux, publicHandler, allowlistChecker(publicOrigins))
 	if googleAuthHandler != nil {
 		// Deliberately NOT behind corsMiddleware, same reasoning as
@@ -199,7 +226,39 @@ func main() {
 		googleAuthHandler.RegisterRedirects(mux)
 	}
 
-	addr := envOr("ADDR", ":8082")
+	// Embedded frontend static builds (see static_landing.go,
+	// static_console.go, static_support.go, static_admin.go — all four npm
+	// projects are built into this binary by backend/Dockerfile*, no
+	// separate frontend deploys). Mounted under their own exact prefixes so
+	// http.ServeMux's most-specific-match-wins routing picks these over
+	// the catch-all landing handler at "/" below; none of these prefixes
+	// collide with the API's "/console/", "/auth/" or "/public/" (the
+	// owner console SPA is deliberately NOT at "/console/" — see
+	// static_console.go for why it's "/app/" instead). "/admin/" (the
+	// frontend) and "/admin/api/" (the API, registered above via
+	// mountCredentialedRoutes) coexist the same way "/app/" and "/console/"
+	// do: ServeMux's longest-prefix-match sends /admin/api/* to the API
+	// mux and everything else under /admin/ to this static handler.
+	//
+	// *apps/admin is NOT currently added to backend/Dockerfile's build
+	// stages — see static_admin.go's doc comment.
+	mux.Handle("/app/", consoleStaticHandler())
+	mux.Handle("/support/", supportStaticHandler())
+	mux.Handle("/admin/", adminStaticHandler())
+	mux.Handle("/", landingStaticHandler())
+
+	// Cloud Run injects PORT (just the port number, e.g. "8080"), not ADDR —
+	// see https://cloud.google.com/run/docs/container-contract#port. Fall
+	// back to it only when ADDR itself isn't set, so any explicit ADDR
+	// (e.g. local dev's ":8082") still wins.
+	addr := os.Getenv("ADDR")
+	if addr == "" {
+		if port := os.Getenv("PORT"); port != "" {
+			addr = ":" + port
+		} else {
+			addr = ":8082"
+		}
+	}
 	log.Info("listening", "addr", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Error("server exited", "err", err)
@@ -233,6 +292,12 @@ func mountCredentialedRoutes(mux *http.ServeMux, console routeRegistrar, siteOri
 	}
 	mux.Handle("/console/", siteCORS(consoleMux))
 	mux.Handle("/auth/", siteCORS(consoleMux))
+	// /admin/api/* (internal/admin) shares the same session cookie and
+	// origin allowlist as /console/ and /auth/ — it's the same kind of
+	// credentialed, cookie-based browser API, just gated by an extra
+	// allowlist check on top (see adminauth). No separate CORS policy or
+	// cookie needed for it.
+	mux.Handle("/admin/api/", siteCORS(consoleMux))
 }
 
 // mountPublicRoutes mounts the anonymous consumer-page API under /public/ with

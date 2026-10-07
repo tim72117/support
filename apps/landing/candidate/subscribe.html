@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>訂閱方案｜候選人 AI 替身</title>
+  <title>訂閱方案｜有問必答 選舉版</title>
   <link rel="stylesheet" href="../assets/base.css" />
   <link rel="stylesheet" href="./theme.css" />
   <style>
@@ -15,21 +15,15 @@
     .plan .price { font-size: 1.8rem; font-weight: 800; margin: 4px 0 12px; }
     .plan .price small { font-size: .9rem; font-weight: 400; color: var(--ink-dim); }
     .plan ul { margin: 0 0 8px; padding-left: 1.2em; color: var(--ink-dim); font-size: .95rem; flex: 1; }
+    .plan .choose { margin-top: 12px; width: 100%; text-align: center; }
     .tag { position: absolute; top: -12px; right: 18px; background: var(--accent); color: #fff; font-size: .75rem; font-weight: 700; padding: 2px 12px; border-radius: 999px; }
-    .signup { max-width: 560px; margin: 0 auto; }
+    .auth { max-width: 420px; margin: 0 auto; }
     label.field { display: block; margin-bottom: 16px; font-weight: 700; font-size: .95rem; }
     label.field input:not([type=radio]) { display: block; width: 100%; margin-top: 6px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; font: inherit; background: #fff; }
     label.field input:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
     .summary { background: var(--brand-wash); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 16px; }
-    .done { text-align: center; max-width: 560px; margin: 40px auto 0; }
-    .tpfield { height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; margin-top: 6px; }
-    .tpfield.tappay-field-focus { border-color: var(--brand); }
-    .tpfield.has-error { border-color: #c0392b; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; }
-    .row > * { flex: 1 1 160px; }
     .modes { display: flex; gap: 20px; margin-bottom: 14px; font-weight: 700; font-size: .95rem; }
     .modes label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
-    .who { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--bg-sunken); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; }
     .linkbtn { background: none; border: none; padding: 0; color: var(--brand-strong); text-decoration: underline; cursor: pointer; font: inherit; }
     .banner { border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 20px; background: var(--accent-wash); font-size: .9rem; }
     .msg-error { color: #c0392b; }
@@ -39,88 +33,84 @@
 <body>
   <div class="wrap">
     <nav class="nav">
-      <a class="logo" href="../index.html">ai-support</a>
+      <a class="logo" href="../index.html">有問必答 <span class="badge-ai" style="margin-left:4px">選舉版</span></a>
       <div class="links"><a href="./index.html">← 返回介紹</a><a class="btn ghost sm" data-console-link href="http://localhost:5177">登入</a></div>
     </nav>
   </div>
 
   <main class="wrap" style="padding-bottom:48px">
-    <div class="section-title" style="padding-top:24px">
+    <div class="section-title" style="padding-top:24px" id="step1Title">
       <h1>選擇你的方案</h1>
       <p>依選舉階段選擇，之後都能升級或取消。</p>
     </div>
 
     <div class="banner" id="banner" hidden></div>
 
-    <form id="signup" novalidate>
-      <div class="plans" role="radiogroup" aria-label="訂閱方案">
-        <label class="card plan">
-          <input type="radio" name="plan" value="starter" data-name="參選起步" data-price="NT$ 990 / 月" />
+    <section id="step1">
+      <div class="plans" id="plans" role="radiogroup" aria-label="訂閱方案">
+        <div class="card plan" data-plan="candidate_trial" data-name="7 天免費試用" data-price="7 天免費，期滿需付費才能繼續使用">
+          <span class="tag">免費試用</span>
+          <h3>7 天免費試用</h3>
+          <div class="price">NT$ 0 <small>／ 7 天</small></div>
+          <ul><li>1 個 AI 替身與專屬頁面</li><li>政見、政績內容管理</li><li>7 天內最多 500 則選民對話</li></ul>
+          <p class="note" style="margin:0 0 8px">不需要信用卡即可開通。7 天試用期滿後，需選擇付費方案並完成付款才能繼續使用；逾期未付款將自動回到免費額度。</p>
+          <button type="button" class="btn choose" id="startTrialBtn" data-plan="candidate_trial">開始免費試用</button>
+        </div>
+        <div class="card plan" data-plan="starter" data-name="參選起步" data-price="NT$ 990 / 月">
           <h3>參選起步</h3>
           <div class="price">NT$ 990 <small>/ 月</small></div>
           <ul><li>1 個 AI 替身與專屬頁面</li><li>政見、政績內容管理</li><li>每月 500 則選民對話</li></ul>
-        </label>
-        <label class="card plan">
+          <button type="button" class="btn choose" data-plan="starter">選擇這個方案</button>
+        </div>
+        <!-- 暫時隱藏：使用者要求先不要列出競選衝刺正式方案（原因待補），
+             只保留上方的 7 天免費試用（candidate_trial）與參選起步
+             （starter）。後端 tier 與 /console/billing/subscribe 仍支援
+             campaign，之後要恢復只需移除 hidden。 -->
+        <div class="card plan" data-plan="campaign" data-name="競選衝刺" data-price="NT$ 2,990 / 月" hidden>
           <span class="tag">最多人選擇</span>
-          <input type="radio" name="plan" value="campaign" data-name="競選衝刺" data-price="NT$ 2,990 / 月" checked />
           <h3>競選衝刺</h3>
           <div class="price">NT$ 2,990 <small>/ 月</small></div>
           <ul><li>包含起步方案全部功能</li><li>文案與宣傳頁面產生</li><li>選民陳情分類整理</li><li>每月 5,000 則選民對話</li></ul>
-        </label>
+          <button type="button" class="btn choose" data-plan="campaign">選擇這個方案</button>
+        </div>
       </div>
-      <p class="note" style="text-align:center;margin-top:12px">價格為示意，正式上線前會調整。</p>
+      <p class="note" style="text-align:center;margin-top:12px">可隨時升級或取消訂閱。</p>
+    </section>
 
-      <div class="signup">
-        <h2 style="margin-top:36px">1. 你的帳號</h2>
-        <div class="summary" id="summary" aria-live="polite"></div>
-        <div class="who" id="who" hidden>
-          <span>已登入：<b id="whoEmail"></b></span>
-          <button type="button" class="linkbtn" id="switchAccount">切換帳號</button>
-        </div>
-        <div id="accountFields">
-          <div class="modes" role="radiogroup" aria-label="帳號">
-            <label><input type="radio" name="mode" value="register" checked /> 建立新帳號</label>
-            <label><input type="radio" name="mode" value="login" /> 我已有帳號</label>
-          </div>
-          <label class="field">聯絡 Email<input type="email" name="email" autocomplete="email" /></label>
-          <label class="field"><span id="pwLabel">設定密碼（至少 8 個字元）</span><input type="password" name="password" autocomplete="new-password" /></label>
-        </div>
+    <section id="step2" class="auth" hidden>
+      <h2>登入或建立帳號</h2>
+      <div class="summary" id="summary" aria-live="polite"></div>
+      <p class="note"><button type="button" class="linkbtn" id="backToPlans">← 重新選擇方案</button></p>
 
-        <h2 style="margin-top:28px">2. 付款資料</h2>
-        <p class="note">信用卡資料直接送到 TapPay，不會經過我們的伺服器。</p>
-        <label class="field">團隊名稱<input name="name" autocomplete="organization" /></label>
-        <label class="field">手機號碼<input name="phone" inputmode="tel" autocomplete="tel" /></label>
-        <label class="field">卡號<div id="card-number" class="tpfield"></div></label>
-        <div class="row">
-          <label class="field">到期日 (MM/YY)<div id="card-exp" class="tpfield"></div></label>
-          <label class="field">安全碼<div id="card-ccv" class="tpfield"></div></label>
+      <form id="authform" novalidate>
+        <div class="modes" role="radiogroup" aria-label="帳號">
+          <label><input type="radio" name="mode" value="register" checked /> 建立新帳號</label>
+          <label><input type="radio" name="mode" value="login" /> 我已有帳號</label>
         </div>
+        <label class="field">聯絡 Email<input type="email" name="email" autocomplete="email" /></label>
+        <label class="field"><span id="pwLabel">設定密碼（至少 8 個字元）</span><input type="password" name="password" autocomplete="new-password" /></label>
         <p id="error" class="note msg-error" role="alert" hidden></p>
-        <button class="btn" type="submit" id="submitBtn" style="width:100%" disabled>確認並付款</button>
-      </div>
-    </form>
+        <button class="btn" type="submit" id="submitBtn" style="width:100%">繼續</button>
+      </form>
+    </section>
 
-    <div class="done card" id="done" hidden>
-      <h2>訂閱完成 🎉</h2>
-      <p id="doneText"></p>
-      <a class="btn" id="goConsole" href="#">進入管理後台</a>
-    </div>
+    <section id="trialDone" class="auth" hidden>
+      <h2>試用已開通</h2>
+      <p class="note" id="trialDoneText"></p>
+      <a class="btn" id="goConsoleFromTrial" href="#" style="width:100%;display:block;text-align:center">進入管理後台</a>
+    </section>
   </main>
 
-  <script src="https://js.tappaysdk.com/sdk/tpdirect/v5.19.2"></script>
   <script>
-    // 後端與管理後台的位址；開發時可用 ?api=...&console=... 覆寫。
+    // 後端位址；開發時可用 ?api=... 覆寫。
     const params = new URLSearchParams(location.search)
     const API = (params.get('api') || 'http://localhost:8082').replace(/\/+$/, '')
+
     const CONSOLE_URL = params.get('console') || 'http://localhost:5177'
-
     const $ = (id) => document.getElementById(id)
-    const form = $('signup')
+    const authform = $('authform')
     const err = $('error')
-    const state = { billing: false, sdkReady: false, canGetPrime: false, email: null, busy: false }
-
-    const selected = () => form.querySelector('input[name=plan]:checked')
-    const mode = () => form.querySelector('input[name=mode]:checked').value
+    const state = { email: null, busy: false, plan: null }
 
     async function api(path, opts = {}) {
       let res
@@ -141,124 +131,119 @@
 
     function showError(msg) { err.textContent = msg; err.hidden = !msg }
     function showBanner(msg) { $('banner').textContent = msg; $('banner').hidden = !msg }
-    function renderSummary() {
-      const p = selected()
-      $('summary').textContent = '已選方案：' + p.dataset.name + '（' + p.dataset.price + '）'
-    }
-    function updateSubmit() {
-      $('submitBtn').disabled = state.busy || !(state.billing && state.sdkReady && state.canGetPrime)
+    const mode = () => authform.querySelector('input[name=mode]:checked').value
+
+    function planCard(key) { return document.querySelector('.plan[data-plan="' + key + '"]') }
+
+    function goToPay(planKey) {
+      location.href = './pay.html?plan=' + encodeURIComponent(planKey) +
+        (params.get('api') ? '&api=' + encodeURIComponent(params.get('api')) : '') +
+        (params.get('console') ? '&console=' + encodeURIComponent(params.get('console')) : '')
     }
 
-    function renderAccount() {
-      const loggedIn = !!state.email
-      $('who').hidden = !loggedIn
-      $('accountFields').hidden = loggedIn
-      if (loggedIn) $('whoEmail').textContent = state.email
-      const reg = mode() === 'register'
-      $('pwLabel').textContent = reg ? '設定密碼（至少 8 個字元）' : '密碼'
-      form.elements.password.autocomplete = reg ? 'new-password' : 'current-password'
+    // startTrial calls the no-card trial endpoint directly: unlike a paid
+    // plan, there is no card to collect, so this never goes through
+    // pay.html. On success it shows a confirmation panel with a link
+    // straight into the console.
+    const trialErrors = {
+      401: '請先登入後再開通試用，將為你導向方案頁。',
+      409: '這個帳號已經有試用或訂閱紀錄，請直接進入管理後台查看。',
+      503: '試用功能尚未開放，請稍後再試。',
     }
+
+    async function startTrial() {
+      $('error').hidden = true
+      try {
+        await api('/console/billing/start-trial', { method: 'POST' })
+        $('goConsoleFromTrial').href = CONSOLE_URL
+        $('trialDoneText').textContent =
+          '已為 ' + state.email + ' 開通 7 天免費試用。試用期滿後，需選擇付費方案並完成付款才能繼續使用。'
+        $('step1').hidden = true
+        $('step1Title').hidden = true
+        $('step2').hidden = true
+        $('trialDone').hidden = false
+      } catch (e2) {
+        showBanner(trialErrors[e2.status] || e2.message || '開通試用時發生錯誤，請稍後再試。')
+      }
+    }
+
+    // proceed sends the owner down the right path once they have an
+    // account: the free trial needs no card and skips pay.html entirely;
+    // every other plan still goes through the normal card-collecting
+    // payment page.
+    function proceed(planKey) {
+      if (planKey === 'candidate_trial') { startTrial(); return }
+      goToPay(planKey)
+    }
+
+    function showStep2(planKey) {
+      state.plan = planKey
+      const card = planCard(planKey)
+      $('summary').textContent = '已選方案：' + card.dataset.name + '（' + card.dataset.price + '）'
+      $('submitBtn').textContent = planKey === 'candidate_trial' ? '繼續開通試用' : '繼續到付款'
+      $('step1').hidden = true
+      $('step1Title').hidden = true
+      $('step2').hidden = false
+    }
+
+    function showStep1() {
+      $('step1').hidden = false
+      $('step1Title').hidden = false
+      $('step2').hidden = true
+    }
+
+    document.querySelectorAll('.choose').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const planKey = btn.dataset.plan
+        if (state.email) {
+          // 已登入，直接繼續（試用免卡開通／其他方案前往付款頁）
+          proceed(planKey)
+          return
+        }
+        showStep2(planKey)
+      })
+    })
+
+    $('backToPlans').addEventListener('click', showStep1)
+
+    authform.addEventListener('change', (e) => {
+      if (e.target.name === 'mode') {
+        const reg = mode() === 'register'
+        $('pwLabel').textContent = reg ? '設定密碼（至少 8 個字元）' : '密碼'
+        authform.elements.password.autocomplete = reg ? 'new-password' : 'current-password'
+      }
+    })
+
+    authform.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      if (state.busy || !state.plan) return
+      showError('')
+      const email = authform.elements.email.value.trim()
+      const password = authform.elements.password.value // 密碼不 trim
+      if (!/^\S+@\S+\.\S+$/.test(email)) return showError('請填寫正確的 Email。')
+      if (!password) return showError('請輸入密碼。')
+      if (mode() === 'register' && password.length < 8) return showError('密碼至少需要 8 個字元。')
+
+      const busyLabel = state.plan === 'candidate_trial' ? '繼續開通試用' : '繼續到付款'
+      state.busy = true; $('submitBtn').disabled = true; $('submitBtn').textContent = '處理中…'
+      try {
+        await api(mode() === 'register' ? '/auth/register' : '/auth/login', { body: { email, password } })
+        state.email = email
+        proceed(state.plan)
+      } catch (e2) {
+        showError(e2.message || '發生錯誤，請稍後再試。')
+      } finally {
+        state.busy = false; $('submitBtn').disabled = false; $('submitBtn').textContent = busyLabel
+      }
+    })
 
     async function init() {
-      renderSummary(); renderAccount()
       try {
         const me = await api('/auth/me')
         state.email = me.Email || me.email || null
       } catch { /* 未登入 */ }
-      renderAccount()
-
-      let cfg
-      try { cfg = await api('/console/billing/config') } catch (e) {
-        showBanner('目前無法連線到服務（' + e.message + '），暫時不能訂閱。')
-        return
-      }
-      if (!cfg.enabled) { showBanner('付款功能尚未開放，請稍後再試。'); return }
-      state.billing = true
-      if (cfg.env === 'sandbox') showBanner('目前是測試環境：請使用 TapPay 提供的測試卡號，不會真的扣款。')
-      setupTapPay(cfg)
+      if (state.email) showBanner('已登入：' + state.email + '，選擇方案後將直接繼續（試用免卡開通／其他方案前往付款頁）。')
     }
-
-    function setupTapPay(cfg) {
-      if (typeof TPDirect === 'undefined') { showError('付款元件載入失敗，請重新整理頁面。'); return }
-      TPDirect.setupSDK(Number(cfg.appId), cfg.appKey, cfg.env)
-      TPDirect.card.setup({
-        fields: {
-          number: { element: '#card-number', placeholder: '**** **** **** ****' },
-          expirationDate: { element: '#card-exp', placeholder: 'MM / YY' },
-          ccv: { element: '#card-ccv', placeholder: 'CCV' },
-        },
-        styles: { input: { color: '#2c2a28', 'font-size': '16px' }, '.invalid': { color: '#c0392b' } },
-      })
-      TPDirect.card.onUpdate((u) => {
-        state.canGetPrime = !!u.canGetPrime
-        $('card-number').classList.toggle('has-error', u.status.number === 2)
-        $('card-exp').classList.toggle('has-error', u.status.expiry === 2)
-        $('card-ccv').classList.toggle('has-error', u.status.ccv === 2)
-        updateSubmit()
-      })
-      state.sdkReady = true
-      updateSubmit()
-    }
-
-    function getPrime() {
-      return new Promise((resolve, reject) => {
-        TPDirect.card.getPrime((r) =>
-          r.status === 0 ? resolve(r.card.prime) : reject(new Error('卡片資料有誤，請檢查後再試（' + r.msg + '）')))
-      })
-    }
-
-    const payErrors = {
-      402: '付款被銀行拒絕，請確認卡片資料或改用其他信用卡。',
-      409: '這個帳號已經有進行中的訂閱，請直接進入管理後台。',
-      502: '付款結果暫時無法確認。請先不要重複付款，並聯絡客服確認。',
-      503: '付款功能尚未開放，請稍後再試。',
-    }
-
-    form.addEventListener('change', (e) => {
-      if (e.target.name === 'plan') renderSummary()
-      if (e.target.name === 'mode') renderAccount()
-    })
-    $('switchAccount').addEventListener('click', async () => {
-      try { await api('/auth/logout', { method: 'POST' }) } catch { /* 忽略 */ }
-      state.email = null; renderAccount()
-    })
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault()
-      if (state.busy || !state.billing) return
-      showError('')
-      // 判斷與使用的是同一份 trim 過的值
-      const name = form.elements.name.value.trim()
-      const phone = form.elements.phone.value.trim()
-      const email = state.email || form.elements.email.value.trim()
-      const password = form.elements.password.value // 密碼不 trim
-      if (!name || !phone) return showError('請填寫團隊名稱與手機號碼。')
-      if (!state.email) {
-        if (!/^\S+@\S+\.\S+$/.test(email)) return showError('請填寫正確的 Email。')
-        if (!password) return showError('請輸入密碼。')
-        if (mode() === 'register' && password.length < 8) return showError('密碼至少需要 8 個字元。')
-      }
-
-      state.busy = true; updateSubmit(); $('submitBtn').textContent = '處理中…'
-      try {
-        if (!state.email) {
-          await api(mode() === 'register' ? '/auth/register' : '/auth/login', { body: { email, password } })
-          state.email = email; renderAccount()
-        }
-        const prime = await getPrime() // 拿到後立刻使用，避免過期
-        const p = selected()
-        await api('/console/billing/subscribe', {
-          body: { tier: p.value, prime, cardholder: { name, email, phoneNumber: phone } },
-        })
-        $('goConsole').href = CONSOLE_URL
-        $('doneText').textContent = '已為 ' + email + ' 開通「' + p.dataset.name + '」。'
-        form.hidden = true; showBanner(''); $('done').hidden = false
-      } catch (e2) {
-        showError(payErrors[e2.status] || e2.message || '發生錯誤，請稍後再試。')
-      } finally {
-        state.busy = false; $('submitBtn').textContent = '確認並付款'; updateSubmit()
-      }
-    })
 
     init()
   </script>

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import styles from './AppShell.module.css'
 import { useBackend } from './BackendContext.tsx'
+import { AccountMenu } from './AccountMenu.tsx'
 
 interface AppShellProps {
   children: ReactNode
@@ -30,12 +31,7 @@ export function AppShell({ children, onNavigateHome, showBackButton }: AppShellP
             小幫手管理後台
           </button>
         </div>
-        <div className={styles.right}>
-          {session && <span className={styles.ownerName}>{session.email}</span>}
-          <button className={styles.logout} onClick={logout} type="button">
-            登出
-          </button>
-        </div>
+        <div className={styles.right}>{session && <AccountMenu email={session.email} onLogout={logout} />}</div>
       </header>
       <main className={styles.main}>{children}</main>
     </div>

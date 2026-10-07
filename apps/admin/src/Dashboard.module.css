@@ -1,0 +1,108 @@
+.section {
+  margin-bottom: var(--space-8);
+}
+
+.heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: var(--space-3);
+}
+
+.card {
+  background: var(--bg-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+  font-size: 14px;
+}
+
+.table th {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+  color: var(--ink-dim);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--border);
+}
+
+.table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.muted {
+  color: var(--ink-faint);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badgeActive {
+  background: var(--success-wash);
+  color: var(--success);
+}
+
+.badgePastDue,
+.badgeTrialing {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+
+.badgeCanceled,
+.badgeExpired {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+.badgeNone {
+  background: var(--bg-sunken);
+  color: var(--ink-faint);
+}
+
+.error {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--danger-wash);
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: var(--space-4);
+}
+
+.refreshRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-3);
+}
+
+.refreshButton {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.refreshButton:hover {
+  background: var(--bg-sunken);
+}

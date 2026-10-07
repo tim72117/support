@@ -181,13 +181,13 @@ func (h *Handler) listBusinesses(w http.ResponseWriter, r *http.Request, user *s
 }
 
 func (h *Handler) createBusiness(w http.ResponseWriter, r *http.Request, user *session.User) {
-	var body struct{ Slug, Name, Tagline, Mascot, ThemeColor string }
+	var body struct{ Slug, Name, Tagline, Mascot, ThemeColor, Layout string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	b, err := h.Businesses.CreateWithBranding(user.ID, body.Slug, business.Branding{
-		Name: body.Name, Tagline: body.Tagline, Mascot: body.Mascot, ThemeColor: body.ThemeColor,
+		Name: body.Name, Tagline: body.Tagline, Mascot: body.Mascot, ThemeColor: body.ThemeColor, Layout: body.Layout,
 	})
 	if err != nil {
 		if errors.Is(err, business.ErrSlugTaken) {
@@ -241,16 +241,17 @@ func (h *Handler) getContent(w http.ResponseWriter, r *http.Request, user *sessi
 	}{content, sections})
 }
 
-// updateBusiness changes a business's name, tagline, mascot and colour. The
-// slug is not editable: it is the public URL and may already be printed or shared.
+// updateBusiness changes a business's name, tagline, mascot, colour and
+// layout. The slug is not editable: it is the public URL and may already be
+// printed or shared.
 func (h *Handler) updateBusiness(w http.ResponseWriter, r *http.Request, user *session.User, b *business.Business) {
-	var body struct{ Name, Tagline, Mascot, ThemeColor *string }
+	var body struct{ Name, Tagline, Mascot, ThemeColor, Layout *string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 	updated, err := h.Businesses.Update(b.ID, business.Patch{
-		Name: body.Name, Tagline: body.Tagline, Mascot: body.Mascot, ThemeColor: body.ThemeColor,
+		Name: body.Name, Tagline: body.Tagline, Mascot: body.Mascot, ThemeColor: body.ThemeColor, Layout: body.Layout,
 	})
 	if err != nil {
 		if isBadBusinessInput(err) {

@@ -1,0 +1,12 @@
+<!doctype html>
+<!--
+  Placeholder checked into git so `go build`/`go:embed` has something to
+  embed before the real apps/support build exists. The Dockerfile's Go
+  build stage deletes this file and copies in the real apps/support/dist
+  output (built with `base: '/support/'`) before compiling — see
+  backend/Dockerfile and cmd/server/static_support.go.
+-->
+<html lang="zh-Hant">
+<head><meta charset="UTF-8" /><title>ai-support support (placeholder build)</title></head>
+<body>support placeholder — run "npm run build" in apps/support and rebuild.</body>
+</html>

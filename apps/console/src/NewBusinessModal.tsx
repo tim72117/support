@@ -116,7 +116,7 @@ export function NewBusinessModal({ onCancel, onCreated }: NewBusinessModalProps)
                 aria-label={MASCOT_LABELS[id]}
                 title={MASCOT_LABELS[id]}
               >
-                <Mascot id={id} color={themeColor} size={32} />
+                <Mascot id={id} color={themeColor} size={40} />
               </button>
             ))}
           </div>

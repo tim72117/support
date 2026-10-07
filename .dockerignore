@@ -1,0 +1,11 @@
+# Keeps the Docker build context (backend/Dockerfile, build context = repo
+# root) small and avoids copying host-built artifacts that would shadow
+# what each Dockerfile build stage installs/builds fresh for itself.
+.git
+**/node_modules
+**/dist
+**/*.log
+
+# Local-only secrets; never baked into the image (env vars are injected at
+# `docker run`/Cloud Run deploy time instead — see backend/Dockerfile).
+backend/.env

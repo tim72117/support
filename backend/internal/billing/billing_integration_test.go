@@ -217,6 +217,86 @@ func TestCancelKeepsPlanUntilPeriodEnds(t *testing.T) {
 	}
 }
 
+func TestStartTrialGrantsAccessWithoutCharging(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	p, err := e.svc.StartTrial(ctx, e.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != StatusTrialing || e.tier(t) != quota.TierCandidateTrial {
+		t.Fatalf("after start trial: %+v tier=%s", p, e.tier(t))
+	}
+	if e.gw.primeCall != 0 || e.gw.tokenCall != 0 {
+		t.Fatalf("a trial must never touch the gateway: prime=%d token=%d", e.gw.primeCall, e.gw.tokenCall)
+	}
+	if !p.CurrentPeriodEnd.Equal(e.now.AddDate(0, 0, 7)) {
+		t.Fatalf("trial period end = %v, want now+7d", p.CurrentPeriodEnd)
+	}
+
+	// A second trial, or subscribing while one is running, is not blocked
+	// by a card/payment check (there is none) but by the same
+	// already-subscribed guard Subscribe itself uses.
+	if _, err := e.svc.StartTrial(ctx, e.userID); !errors.Is(err, ErrAlreadySubscribed) {
+		t.Fatalf("second trial = %v, want ErrAlreadySubscribed", err)
+	}
+}
+
+func TestTrialExpiresToFreeWithoutAnyCharge(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	if _, err := e.svc.StartTrial(ctx, e.userID); err != nil {
+		t.Fatal(err)
+	}
+	e.now = e.now.AddDate(0, 0, 6)
+	if err := e.svc.RenewDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e.tier(t) != quota.TierCandidateTrial {
+		t.Fatalf("trial must still be active before day 7: tier=%s", e.tier(t))
+	}
+
+	e.now = e.now.AddDate(0, 0, 2) // past the 7-day mark
+	if err := e.svc.RenewDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := e.svc.Get(ctx, e.userID)
+	if p.Status != StatusExpired || e.tier(t) != quota.TierFree {
+		t.Fatalf("after trial end: %+v tier=%s", p, e.tier(t))
+	}
+	if e.gw.primeCall != 0 || e.gw.tokenCall != 0 {
+		t.Fatalf("trial expiry must never charge: prime=%d token=%d", e.gw.primeCall, e.gw.tokenCall)
+	}
+
+	// The owner can now subscribe normally (the existing card-collecting
+	// flow) to a paid plan, same as anyone else past a cancelled/expired
+	// profile.
+	if _, err := e.subscribe(t); err != nil {
+		t.Fatalf("subscribe after trial expiry: %v", err)
+	}
+	if e.tier(t) != quota.TierCampaign {
+		t.Fatalf("after post-trial subscribe: tier=%s", e.tier(t))
+	}
+}
+
+func TestCancelTrialDropsToFreeImmediately(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	if _, err := e.svc.StartTrial(ctx, e.userID); err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.svc.Cancel(ctx, e.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != StatusExpired || e.tier(t) != quota.TierFree {
+		t.Fatalf("after cancelling a trial: %+v tier=%s", p, e.tier(t))
+	}
+	if e.gw.primeCall != 0 || e.gw.tokenCall != 0 {
+		t.Fatalf("cancelling a trial must never charge: prime=%d token=%d", e.gw.primeCall, e.gw.tokenCall)
+	}
+}
+
 func TestAddMonthsClamps(t *testing.T) {
 	jan31 := time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)
 	if got := addMonths(jan31, 1); got.Month() != time.February || got.Day() != 28 {

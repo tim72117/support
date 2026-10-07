@@ -19,13 +19,39 @@ import (
 	"github.com/tim72117/ai-support/internal/quota"
 )
 
-type fakeBusinesses struct{ byslug map[string]*business.Business }
+type fakeBusinesses struct {
+	byslug   map[string]*business.Business
+	sections map[int64][]business.Section // businessID -> sections (including empty-body ones)
+}
 
 func (f fakeBusinesses) GetBySlug(slug string) (*business.Business, error) {
 	if b, ok := f.byslug[slug]; ok {
 		return b, nil
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (f fakeBusinesses) ListSections(businessID int64) ([]business.Section, error) {
+	out := make([]business.Section, 0)
+	for _, s := range f.sections[businessID] {
+		if strings.TrimSpace(s.Body) == "" {
+			continue
+		}
+		out = append(out, business.Section{ID: s.ID, Title: s.Title})
+	}
+	return out, nil
+}
+
+func (f fakeBusinesses) GetSection(businessID int64, sectionID string) (business.Section, error) {
+	for _, s := range f.sections[businessID] {
+		if s.ID == sectionID {
+			if strings.TrimSpace(s.Body) == "" {
+				return business.Section{}, business.ErrSectionNotFound
+			}
+			return s, nil
+		}
+	}
+	return business.Section{}, business.ErrSectionNotFound
 }
 
 type fakeChats struct {
@@ -115,11 +141,19 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{chats: newFakeChats(), quota: &fakeQuota{allowed: true}}
-	biz := fakeBusinesses{byslug: map[string]*business.Business{
-		"shop":  {ID: 1, OwnerID: 10, Slug: "shop", Name: "Shop", OnagentAppID: str("app-1"), OnagentAPIKey: str("key-1")},
-		"other": {ID: 2, OwnerID: 11, Slug: "other", Name: "Other", OnagentAppID: str("app-2"), OnagentAPIKey: str("key-2")},
-		"bare":  {ID: 3, OwnerID: 12, Slug: "bare", Name: "Bare"},
-	}}
+	biz := fakeBusinesses{
+		byslug: map[string]*business.Business{
+			"shop":  {ID: 1, OwnerID: 10, Slug: "shop", Name: "Shop", OnagentAppID: str("app-1"), OnagentAPIKey: str("key-1")},
+			"other": {ID: 2, OwnerID: 11, Slug: "other", Name: "Other", OnagentAppID: str("app-2"), OnagentAPIKey: str("key-2")},
+			"bare":  {ID: 3, OwnerID: 12, Slug: "bare", Name: "Bare"},
+		},
+		sections: map[int64][]business.Section{
+			1: {
+				{ID: "hours", Title: "營業時間", Body: "週一到週五 9:00–18:00"},
+				{ID: "other", Title: "其他", Body: ""},
+			},
+		},
+	}
 	e.h = NewHandler(Config{Businesses: biz, Chats: e.chats, Quota: e.quota, OnagentWSURL: "wss://onagent.test/ws", Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	e.mux = http.NewServeMux()
 	e.h.Register(e.mux)
@@ -170,6 +204,60 @@ func TestGetBusiness(t *testing.T) {
 	}
 	if rec = e.do("GET", "/public/businesses/nope", ""); rec.Code != 404 || errCode(t, rec) != CodeNotFound {
 		t.Fatalf("missing: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListSections(t *testing.T) {
+	e := newEnv(t)
+	rec := e.do("GET", "/public/businesses/shop/sections", "")
+	if rec.Code != 200 {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct{ Sections []sectionSummary }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sections) != 1 || out.Sections[0].ID != "hours" || out.Sections[0].Title != "營業時間" {
+		t.Fatalf("sections %+v", out.Sections)
+	}
+	if strings.Contains(rec.Body.String(), "9:00") {
+		t.Fatal("list_sections must not leak section bodies")
+	}
+
+	// business with no sections saved at all: empty list, not an error.
+	rec = e.do("GET", "/public/businesses/bare/sections", "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"sections":[]`) {
+		t.Fatalf("no sections: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if rec = e.do("GET", "/public/businesses/nope/sections", ""); rec.Code != 404 || errCode(t, rec) != CodeNotFound {
+		t.Fatalf("unknown business: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetSection(t *testing.T) {
+	e := newEnv(t)
+	rec := e.do("GET", "/public/businesses/shop/sections/hours", "")
+	if rec.Code != 200 {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct{ ID, Title, Body string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != "hours" || out.Title != "營業時間" || !strings.Contains(out.Body, "9:00") {
+		t.Fatalf("section %+v", out)
+	}
+
+	// unknown id, empty-body section, and unknown business all read as 404.
+	if rec = e.do("GET", "/public/businesses/shop/sections/nope", ""); rec.Code != 404 || errCode(t, rec) != CodeNotFound {
+		t.Fatalf("unknown section: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = e.do("GET", "/public/businesses/shop/sections/other", ""); rec.Code != 404 {
+		t.Fatalf("empty section: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = e.do("GET", "/public/businesses/nope/sections/hours", ""); rec.Code != 404 {
+		t.Fatalf("unknown business: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

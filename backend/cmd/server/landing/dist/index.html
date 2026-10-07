@@ -1,0 +1,12 @@
+<!doctype html>
+<!--
+  Placeholder checked into git so `go build`/`go:embed` has something to
+  embed before the real apps/landing build exists (e.g. on a dev machine
+  that hasn't run `npm run build` yet). The Dockerfile's Go build stage
+  deletes this file and copies in the real apps/landing/dist output before
+  compiling — see backend/Dockerfile and cmd/server/static.go.
+-->
+<html lang="zh-Hant">
+<head><meta charset="UTF-8" /><title>ai-support (placeholder build)</title></head>
+<body>landing placeholder — run "npm run build" in apps/landing and rebuild.</body>
+</html>

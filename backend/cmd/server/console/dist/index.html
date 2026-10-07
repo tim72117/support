@@ -1,0 +1,12 @@
+<!doctype html>
+<!--
+  Placeholder checked into git so `go build`/`go:embed` has something to
+  embed before the real apps/console build exists. The Dockerfile's Go
+  build stage deletes this file and copies in the real apps/console/dist
+  output (built with `base: '/app/'`) before compiling — see
+  backend/Dockerfile and cmd/server/static_console.go.
+-->
+<html lang="zh-Hant">
+<head><meta charset="UTF-8" /><title>ai-support console (placeholder build)</title></head>
+<body>console placeholder — run "npm run build" in apps/console and rebuild.</body>
+</html>

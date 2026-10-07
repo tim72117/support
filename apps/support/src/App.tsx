@@ -76,7 +76,20 @@ function BusinessChatPage({ business }: { business: PublicBusiness }) {
   const unavailable = !business.chat.available || notice?.kind === 'unavailable'
 
   useEffect(() => {
-    listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+    const list = listRef.current
+    if (!list) return
+    // Only auto-scroll when the user is already at (or near) the bottom —
+    // otherwise a reply arriving while they're reading older messages would
+    // yank the view back down. The last message being the user's own is
+    // always a "they just sent it" case, so that always scrolls too.
+    const NEAR_BOTTOM_PX = 100
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight
+    const lastIsOwnMessage = messages[messages.length - 1]?.role === 'user'
+    if (distanceFromBottom <= NEAR_BOTTOM_PX || lastIsOwnMessage) {
+      // Optional chaining: jsdom (the test environment) doesn't implement
+      // scrollTo, so this would otherwise throw on every render in tests.
+      list.scrollTo?.({ top: list.scrollHeight, behavior: 'smooth' })
+    }
   }, [messages, isTyping])
 
   function handleSubmit(e: FormEvent) {
@@ -92,8 +105,62 @@ function BusinessChatPage({ business }: { business: PublicBusiness }) {
     void send(question)
   }
 
+  const chatArea = !started ? (
+    <div className={styles.welcomeCard}>
+      <h2 className={styles.welcomeTitle}>有問題想問我們嗎？</h2>
+      <span className={styles.welcomeText}>
+        點擊下方按鈕開始對話，AI 小幫手會依照 {business.name} 提供的資訊回答你的問題。
+      </span>
+      {unavailable ? (
+        <span className={styles.welcomeText}>目前無法服務，請稍後再試。</span>
+      ) : (
+        <button type="button" className={styles.startButton} onClick={start}>
+          開始對話
+        </button>
+      )}
+      {!unavailable && (
+        <div className={styles.suggestions}>
+          {branding.suggestedQuestions.map((q) => (
+            <button key={q} type="button" className={styles.suggestionChip} onClick={() => handleSuggestion(q)}>
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : (
+    <ChatPanel
+      business={business}
+      branding={branding}
+      messages={messages}
+      isTyping={isTyping}
+      notice={notice}
+      unavailable={unavailable}
+      listRef={listRef}
+      input={input}
+      onInputChange={setInput}
+      onSubmit={handleSubmit}
+    />
+  )
+
+  if (branding.layout === 'split') {
+    return (
+      <div className={styles.splitPage} style={{ '--theme-color': branding.themeColor } as React.CSSProperties}>
+        <div className={styles.splitSide} style={{ background: `${branding.themeColor}1a` }}>
+          <div className={styles.splitSideInner}>
+            <Mascot id={branding.mascot} color={branding.themeColor} size={72} animated />
+            <h1 className={styles.splitBusinessName}>{business.name}</h1>
+            {branding.tagline && <span className={styles.splitTagline}>{branding.tagline}</span>}
+            <span className={styles.splitSidePlaceholder}>之後可以在這裡放上你的圖片，讓顧客一眼認出你的服務。</span>
+          </div>
+        </div>
+        <div className={styles.splitMain}>{chatArea}</div>
+      </div>
+    )
+  }
+
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={{ '--theme-color': branding.themeColor } as React.CSSProperties}>
       <div className={styles.brandPanel} style={{ background: branding.themeColor }}>
         <div className={styles.brandBlobTop} />
         <div className={styles.brandBlobBottom} />
@@ -104,55 +171,7 @@ function BusinessChatPage({ business }: { business: PublicBusiness }) {
         {branding.tagline && <span className={styles.tagline}>{branding.tagline}</span>}
       </div>
 
-      <div className={styles.body}>
-        {!started ? (
-          <div className={styles.welcomeCard}>
-            <h2 className={styles.welcomeTitle}>有問題想問我們嗎？</h2>
-            <span className={styles.welcomeText}>
-              點擊下方按鈕開始對話，AI 小幫手會依照 {business.name} 提供的資訊回答你的問題。
-            </span>
-            {unavailable ? (
-              <span className={styles.welcomeText}>目前無法服務，請稍後再試。</span>
-            ) : (
-              <button
-                type="button"
-                className={styles.startButton}
-                style={{ background: branding.themeColor }}
-                onClick={start}
-              >
-                開始對話
-              </button>
-            )}
-            {!unavailable && (
-              <div className={styles.suggestions}>
-                {branding.suggestedQuestions.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    className={styles.suggestionChip}
-                    onClick={() => handleSuggestion(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <ChatPanel
-            business={business}
-            branding={branding}
-            messages={messages}
-            isTyping={isTyping}
-            notice={notice}
-            unavailable={unavailable}
-            listRef={listRef}
-            input={input}
-            onInputChange={setInput}
-            onSubmit={handleSubmit}
-          />
-        )}
-      </div>
+      <div className={styles.body}>{chatArea}</div>
     </div>
   )
 }
@@ -181,7 +200,10 @@ function ChatPanel({
   onSubmit: (e: FormEvent) => void
 }) {
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // isComposing / keyCode 229 guards against IME (注音/拼音/日文) candidate
+    // selection: the browser fires a real Enter keydown when the user picks
+    // a candidate, which would otherwise submit the half-typed message.
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
       e.preventDefault()
       onSubmit(e as unknown as FormEvent)
     }
@@ -203,12 +225,7 @@ function ChatPanel({
             key={m.id}
             className={`${styles.bubbleRow} ${m.role === 'user' ? styles.bubbleRowUser : ''}`}
           >
-            <div
-              className={`${styles.bubble} ${
-                m.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant
-              }`}
-              style={m.role === 'user' ? { background: branding.themeColor } : undefined}
-            >
+            <div className={`${styles.bubble} ${m.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant}`}>
               {m.text}
             </div>
           </div>
@@ -237,6 +254,7 @@ function ChatPanel({
           className={styles.composerInput}
           rows={1}
           placeholder="輸入訊息……"
+          aria-label="輸入訊息"
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -246,8 +264,8 @@ function ChatPanel({
         <button
           type="submit"
           className={styles.sendButton}
-          style={{ background: branding.themeColor }}
           disabled={!input.trim() || isTyping || unavailable}
+          aria-label="送出"
         >
           ➤
         </button>

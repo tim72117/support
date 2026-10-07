@@ -105,8 +105,29 @@ func TestPushContentSendsThought(t *testing.T) {
 		t.Fatalf("got %s %s", r.Method, r.Path)
 	}
 	th, _ := r.Body["thought"].(string)
-	if !strings.Contains(th, "晨光烘焙坊") || !strings.Contains(th, "週一公休") {
-		t.Fatalf("thought missing parts: %q", th)
+	// The thought now only briefs the AI to use list_sections/read_section —
+	// it must mention the business name and the two tools, but must NOT
+	// carry the owner's actual content text (that only lives behind the
+	// tools now, see PushContent's doc comment).
+	if !strings.Contains(th, "晨光烘焙坊") {
+		t.Fatalf("thought missing business name: %q", th)
+	}
+	if !strings.Contains(th, "list_sections") || !strings.Contains(th, "read_section") {
+		t.Fatalf("thought missing tool names: %q", th)
+	}
+	if strings.Contains(th, "週一公休") {
+		t.Fatalf("thought must not embed content text anymore: %q", th)
+	}
+}
+
+func TestBuildThoughtMentionsEmptyContent(t *testing.T) {
+	th := BuildThought("晨光烘焙坊", "")
+	if !strings.Contains(th, "尚未填寫") {
+		t.Fatalf("thought should flag empty content: %q", th)
+	}
+	th2 := BuildThought("晨光烘焙坊", "something")
+	if strings.Contains(th2, "尚未填寫") {
+		t.Fatalf("thought should not flag empty content when there is some: %q", th2)
 	}
 }
 

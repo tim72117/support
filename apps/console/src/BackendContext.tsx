@@ -7,6 +7,9 @@ import {
   type Business,
   type BusinessPatch,
   type ContentSection,
+  type Conversation,
+  type ConversationDetail,
+  type LayoutId,
   type MascotId,
   type NewBusinessInput,
 } from './model.ts'
@@ -24,6 +27,11 @@ interface Session {
 export type SyncStatus = 'ok' | 'failed' | 'disabled' | 'unknown'
 
 export type LoadState = 'idle' | 'loading' | 'ready' | 'error'
+
+/** Conversations are an optional backend feature; 'disabled' is a distinct,
+ * non-retryable outcome from a plain 'error' (see console.go: a nil Chats
+ * store answers 503). */
+export type ConversationsState = 'idle' | 'loading' | 'ready' | 'error' | 'disabled'
 
 interface Backend {
   session: Session | null
@@ -44,11 +52,53 @@ interface Backend {
   loadContent: (id: number) => Promise<ContentSection[]>
   saveContent: (id: number, sections: ContentSection[]) => Promise<SyncStatus>
   syncOnagent: (id: number) => Promise<SyncStatus>
+
+  loadConversations: (businessId: number) => Promise<{ state: ConversationsState; list: Conversation[]; error: string }>
+  loadConversation: (businessId: number, conversationId: string) => Promise<ConversationDetail>
 }
 
 interface ApiUser {
   ID: number
   Email: string
+}
+
+// backend/internal/conversation.Conversation / Message are serialised with
+// their Go json tags (camelCase, unlike the capitalised business fields
+// above, which predate those tags).
+interface ApiConversation {
+  id: string
+  businessId: number
+  createdAt: string
+}
+
+interface ApiMessage {
+  id: number
+  conversationId: string
+  role: string
+  content: string
+  replyTo?: number
+  createdAt: string
+}
+
+interface ApiConversationDetail extends ApiConversation {
+  messages: ApiMessage[]
+}
+
+function toConversation(c: ApiConversation): Conversation {
+  return { id: c.id, createdAt: c.createdAt }
+}
+
+function toConversationDetail(c: ApiConversationDetail): ConversationDetail {
+  return {
+    id: c.id,
+    createdAt: c.createdAt,
+    messages: c.messages.map((m) => ({
+      id: m.id,
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+      createdAt: m.createdAt,
+    })),
+  }
 }
 
 // The backend serialises Go structs as-is, hence the capitalised names.
@@ -59,11 +109,13 @@ interface ApiBusiness {
   Tagline: string
   Mascot: string
   ThemeColor: string
+  Layout: string
   Connected: boolean
   onagentSync?: string
 }
 
-const MASCOTS: MascotId[] = ['fox', 'bear', 'cat', 'bird']
+const MASCOTS: MascotId[] = ['fox', 'bear', 'cat', 'bird', 'rabbit', 'dog', 'owl', 'penguin', 'panda', 'pig']
+const LAYOUTS: LayoutId[] = ['center', 'split']
 
 function toSession(u: ApiUser): Session {
   return { email: u.Email, ownerName: u.Email.split('@')[0] ?? '老闆' }
@@ -77,6 +129,7 @@ function toBusiness(b: ApiBusiness): Business {
     tagline: b.Tagline ?? '',
     mascot: (MASCOTS as string[]).includes(b.Mascot) ? (b.Mascot as MascotId) : 'fox',
     themeColor: b.ThemeColor || '#FF8A5B',
+    layout: (LAYOUTS as string[]).includes(b.Layout) ? (b.Layout as LayoutId) : 'center',
     connected: !!b.Connected,
   }
 }
@@ -190,6 +243,24 @@ export function BackendProvider({ children }: { children: ReactNode }) {
         }
         setBusinesses((prev) => prev.map((b) => (b.id === id ? { ...b, connected: true } : b)))
         return 'ok'
+      },
+
+      loadConversations: async (businessId) => {
+        try {
+          const list = await api<ApiConversation[] | null>(`/console/businesses/${businessId}/conversations`)
+          return { state: 'ready' as const, list: (list ?? []).map(toConversation), error: '' }
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 503) {
+            return { state: 'disabled' as const, list: [], error: '' }
+          }
+          return { state: 'error' as const, list: [], error: err instanceof Error ? err.message : '無法載入對話紀錄' }
+        }
+      },
+      loadConversation: async (businessId, conversationId) => {
+        const detail = await api<ApiConversationDetail>(
+          `/console/businesses/${businessId}/conversations/${conversationId}`,
+        )
+        return toConversationDetail(detail)
       },
     }),
     [session, loading, businesses, businessesState, businessesError, reloadBusinesses],

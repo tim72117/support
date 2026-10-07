@@ -31,6 +31,10 @@ describe('console login against the backend', () => {
   it('restores an existing session from /auth/me without showing the login form', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { ID: 1, Email: 'owner@example.com' }))
     renderApp()
+    // The email lives inside the account menu's dropdown now (see
+    // AccountMenu), not displayed flat in the top bar — open it first.
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '帳號選單' }))
     expect(await screen.findByText('owner@example.com')).toBeInTheDocument()
     expect(screen.queryByLabelText('密碼')).not.toBeInTheDocument()
   })
@@ -51,6 +55,7 @@ describe('console login against the backend', () => {
     expect(String(url)).toMatch(/\/auth\/login$/)
     expect(init.credentials).toBe('include')
     expect(JSON.parse(init.body)).toEqual({ email: 'a@b.co', password: ' pw with spaces ' })
+    await user.click(await screen.findByRole('button', { name: '帳號選單' }))
     expect(await screen.findByText('a@b.co')).toBeInTheDocument()
   })
 

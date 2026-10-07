@@ -1,0 +1,31 @@
+# onagent tool definition for read_section.
+#
+# Push with:
+#   onagent tool create <appId> backend/onagent-tools/read_section.yaml
+#
+# Execution model: same as list_sections.yaml (see that file's comment) —
+# the browser-side handler in apps/support/src/useChat.ts answers this call
+# by requesting
+#   GET /public/businesses/{slug}/sections/{id}
+# from this ai-support backend (see backend/internal/public/public.go).
+name: read_section
+description: >-
+  Read the full text of one content section this business owner has
+  filled in, by its section id (get valid ids from list_sections first —
+  never guess an id). Use this to get the actual facts needed to answer a
+  visitor's question, e.g. read the "hours" section before answering a
+  question about business hours. If the section id does not exist or has
+  no content yet, you will get an error back; in that case say you are not
+  sure rather than making something up.
+parameters:
+  type: object
+  properties:
+    sectionId:
+      type: string
+      description: >-
+        The id of the section to read, exactly as returned by
+        list_sections (e.g. "hours", "contact", "products", "policy",
+        "faq", "other").
+  required:
+    - sectionId
+kind: query

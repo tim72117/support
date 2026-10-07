@@ -18,11 +18,32 @@ const (
 	// any user with no subscriptions row is treated as.
 	TierFree Tier = "free"
 
-	// TierStarter / TierCampaign are the paid tiers sold on the landing
-	// pages (參選起步 / 競選衝刺). Assigned when a subscription is paid for
-	// (or by an admin via SetTier).
+	// TierStarter / TierCampaign are the paid tiers sold on the candidate
+	// landing page (參選起步 / 競選衝刺). Assigned when a subscription is
+	// paid for (or by an admin via SetTier).
 	TierStarter  Tier = "starter"
 	TierCampaign Tier = "campaign"
+
+	// TierBizStarter / TierBizGrowth are the paid tiers sold on the
+	// business landing page (輕量起步 / 成長方案). Separate identifiers from
+	// TierStarter/TierCampaign because the two product lines have different
+	// pricing and limits even where a name is similar.
+	TierBizStarter Tier = "biz_starter"
+	TierBizGrowth  Tier = "biz_growth"
+
+	// TierCandidateTrial is the 7-day free trial offered on the candidate
+	// landing page. No card is collected and nothing is ever charged for
+	// it: billing.Service.StartTrial assigns this tier directly, with
+	// billing_profiles.current_period_end set to now+7 days. When that
+	// date passes, billing.Service.Get/the subscription status reports the
+	// trial as expired; the owner must then subscribe normally (through
+	// the existing card-collecting Subscribe flow, to TierStarter or
+	// TierCampaign) to keep paid access — there is no automatic conversion
+	// or charge. Kept as its own tier (rather than aliasing TierCampaign)
+	// so a trial user is distinguishable in subscriptions.tier /
+	// billing_profiles.tier for support and reporting, and so quota can
+	// grant it its own allowance.
+	TierCandidateTrial Tier = "candidate_trial"
 )
 
 // DefaultTier is assigned to new accounts and assumed for any user whose
@@ -68,6 +89,24 @@ var plans = map[Tier]Plan{
 		Tier:          TierCampaign,
 		Name:          "競選衝刺",
 		MonthlyTokens: 10_000_000,
+	},
+	TierBizStarter: {
+		Tier:          TierBizStarter,
+		Name:          "輕量起步",
+		MonthlyTokens: 1_000_000,
+	},
+	TierBizGrowth: {
+		Tier:          TierBizGrowth,
+		Name:          "成長方案",
+		MonthlyTokens: 10_000_000,
+	},
+	TierCandidateTrial: {
+		Tier: TierCandidateTrial,
+		Name: "7 天免費試用",
+		// Same allowance as TierStarter (500 conversations' worth, per the
+		// landing page copy) — the trial is meant to let a candidate try the
+		// product, not hand out the flagship plan's full quota for free.
+		MonthlyTokens: 1_000_000,
 	},
 }
 

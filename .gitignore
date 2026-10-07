@@ -4,6 +4,21 @@ dist/
 *.tsbuildinfo
 npm-debug.log*
 
+# Exceptions to dist/ above: these are checked-in placeholder index.html
+# files (not real frontend build output) that make
+# backend/cmd/server/static_{landing,console,support}.go's //go:embed
+# directives compile on a fresh clone before anyone has run `npm run
+# build`. backend/Dockerfile overwrites them with the real builds — see
+# the comment in each placeholder file and in backend/Dockerfile.
+!/backend/cmd/server/landing/dist/
+!/backend/cmd/server/landing/dist/index.html
+!/backend/cmd/server/console/dist/
+!/backend/cmd/server/console/dist/index.html
+!/backend/cmd/server/support/dist/
+!/backend/cmd/server/support/dist/index.html
+!/backend/cmd/server/admin/dist/
+!/backend/cmd/server/admin/dist/index.html
+
 # Go
 /backend/server
 /backend/*.exe

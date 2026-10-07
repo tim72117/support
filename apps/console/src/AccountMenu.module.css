@@ -1,0 +1,62 @@
+.root {
+  position: relative;
+}
+
+.avatarButton {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatarButton:hover {
+  background: var(--brand-strong);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  z-index: 10;
+}
+
+.menuEmail {
+  display: block;
+  font-size: 13px;
+  color: var(--ink-dim);
+  word-break: break-all;
+  padding: 0 var(--space-1);
+}
+
+.menuLogout {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--ink-dim);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.menuLogout:hover {
+  background: var(--bg-sunken);
+}
