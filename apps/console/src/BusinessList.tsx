@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import styles from './BusinessList.module.css'
-import { useMockBackend } from './MockBackendContext.tsx'
+import { useBackend } from './BackendContext.tsx'
 import { Mascot } from './Mascot.tsx'
 import { NewBusinessModal } from './NewBusinessModal.tsx'
 
 interface BusinessListProps {
-  onOpenBusiness: (id: string) => void
+  onOpenBusiness: (id: number) => void
 }
 
 export function BusinessList({ onOpenBusiness }: BusinessListProps) {
-  const { businesses, createBusiness } = useMockBackend()
+  const { businesses, businessesState, businessesError, reloadBusinesses } = useBackend()
   const [showNewModal, setShowNewModal] = useState(false)
+
+  const loaded = businessesState === 'ready'
 
   return (
     <div>
@@ -21,16 +23,38 @@ export function BusinessList({ onOpenBusiness }: BusinessListProps) {
             每個服務都有自己的對話頁面與 AI 小幫手，顧客可以直接上去問問題。
           </span>
         </div>
-        <button type="button" className={styles.newButton} onClick={() => setShowNewModal(true)}>
+        <button
+          type="button"
+          className={styles.newButton}
+          onClick={() => setShowNewModal(true)}
+          disabled={!loaded}
+        >
           ＋ 新增服務
         </button>
       </div>
 
-      {businesses.length === 0 ? (
+      {businessesState === 'error' && (
+        <div className={styles.emptyState} role="alert">
+          無法載入你的服務：{businessesError}
+          <div>
+            <button type="button" className={styles.retryButton} onClick={() => void reloadBusinesses()}>
+              重新載入
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(businessesState === 'loading' || businessesState === 'idle') && (
+        <div className={styles.emptyState}>載入中…</div>
+      )}
+
+      {loaded && businesses.length === 0 && (
         <div className={styles.emptyState}>
           還沒有任何服務，點選右上角「新增服務」開始設定你的第一個 AI 小幫手吧！
         </div>
-      ) : (
+      )}
+
+      {loaded && businesses.length > 0 && (
         <div className={styles.grid}>
           {businesses.map((biz) => (
             <button
@@ -68,8 +92,7 @@ export function BusinessList({ onOpenBusiness }: BusinessListProps) {
       {showNewModal && (
         <NewBusinessModal
           onCancel={() => setShowNewModal(false)}
-          onCreate={(biz) => {
-            createBusiness(biz)
+          onCreated={(biz) => {
             setShowNewModal(false)
             onOpenBusiness(biz.id)
           }}

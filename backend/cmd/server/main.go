@@ -1,9 +1,10 @@
-// Command server runs the ai-support backend: business-owner accounts and
-// the console API for managing businesses and their content. It never talks
-// to an LLM itself — the consumer-facing chat page embeds onagent's own
-// @onagent/bridge SDK directly, and this backend's only relationship to
-// onagent is (once internal/onagentclient is wired up) pushing a business's
-// content to onagent as that business's tool definitions.
+// Command server runs the ai-support backend: business-owner accounts, the
+// console API for managing businesses and their content, and the anonymous
+// /public/* API behind each consumer chat page. It never talks to an LLM
+// itself: the chat page forwards messages to onagent from the browser with
+// @onagent/bridge, but only after this backend has recorded and quota-checked
+// them; this backend's own calls to onagent (internal/onagentclient) just
+// provision each business's onagent app and push its content.
 package main
 
 import (
@@ -20,8 +21,11 @@ import (
 	"github.com/tim72117/ai-support/internal/billing"
 	"github.com/tim72117/ai-support/internal/business"
 	"github.com/tim72117/ai-support/internal/console"
+	"github.com/tim72117/ai-support/internal/conversation"
 	"github.com/tim72117/ai-support/internal/db"
 	"github.com/tim72117/ai-support/internal/googleauth"
+	"github.com/tim72117/ai-support/internal/onagentclient"
+	"github.com/tim72117/ai-support/internal/public"
 	"github.com/tim72117/ai-support/internal/quota"
 	"github.com/tim72117/ai-support/internal/session"
 	"github.com/tim72117/ai-support/internal/tappay"
@@ -54,6 +58,23 @@ Configured entirely via environment variables (optionally loaded from a
                               (default "true").
   CONSOLE_URL                Where the browser lands after Google sign-in
                               succeeds (default "http://localhost:5175").
+  PUBLIC_ALLOWED_ORIGIN      Comma-separated origins of the consumer chat page
+                              (apps/support) allowed to call the anonymous
+                              /public/* API (no credentials, never "*"). Also
+                              registered on each onagent app as the origins its
+                              browser-side API key may be used from.
+  PUBLIC_TRUST_PROXY         "true" when behind a reverse proxy: take the client
+                              IP for rate limiting from X-Forwarded-For.
+  ONAGENT_BASE_URL           onagent HTTP origin, e.g. "https://onagent.example.com".
+  ONAGENT_TOKEN              Bearer token of this deployment's onagent business
+                              account (a usertoken, like "onagent login" stores).
+                              Never log or send to a client. Without both, the
+                              onagent integration is off: businesses are saved
+                              but not provisioned, and chat reports unavailable.
+  ONAGENT_WS_URL             Optional: WebSocket URL handed to browsers
+                              (default: ONAGENT_BASE_URL with ws(s):// and /ws).
+  ONAGENT_APP_ID_PREFIX      Optional prefix for generated onagent app ids
+                              (default "aisupport-").
 `
 
 func main() {
@@ -88,6 +109,41 @@ func main() {
 		log.Info("QUOTA_ENABLED=false: usage quota is not enforced")
 	}
 	consoleHandler := console.NewHandler(businessStore, sessionStore, quotaSvc, log)
+	chatStore := conversation.New(gormDB)
+	consoleHandler.Chats = chatStore
+
+	publicOrigins := splitOrigins(os.Getenv("PUBLIC_ALLOWED_ORIGIN"))
+	if len(publicOrigins) == 0 {
+		log.Warn("no PUBLIC_ALLOWED_ORIGIN set; browsers on other origins cannot call /public/*, and onagent apps get no allowed origin (dev mode only)")
+	}
+
+	// onagent integration: off (log one line, keep starting) unless both the
+	// base URL and the business-account token are set.
+	onagent := onagentclient.New(onagentclient.Config{
+		BaseURL:        os.Getenv("ONAGENT_BASE_URL"),
+		Token:          os.Getenv("ONAGENT_TOKEN"),
+		AppIDPrefix:    os.Getenv("ONAGENT_APP_ID_PREFIX"),
+		AllowedOrigins: publicOrigins,
+	})
+	onagentWSURL := os.Getenv("ONAGENT_WS_URL")
+	if onagent.Enabled() {
+		consoleHandler.Onagent = onagent
+		if onagentWSURL == "" {
+			onagentWSURL = onagent.WSURL()
+		}
+		log.Info("onagent integration enabled", "ws", onagentWSURL)
+	} else {
+		log.Warn("ONAGENT_BASE_URL / ONAGENT_TOKEN not set; onagent integration is disabled (businesses are saved but not provisioned; public chat reports unavailable)")
+		onagentWSURL = ""
+	}
+	publicHandler := public.NewHandler(public.Config{
+		Businesses:   businessStore,
+		Chats:        chatStore,
+		Quota:        quotaSvc,
+		OnagentWSURL: onagentWSURL,
+		TrustProxy:   os.Getenv("PUBLIC_TRUST_PROXY") == "true",
+		Log:          log,
+	})
 
 	// TapPay billing. Needs the quota service (it moves owners between
 	// tiers) and TapPay credentials; without either, /console/billing/*
@@ -134,6 +190,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mountCredentialedRoutes(mux, multiRegistrar{consoleHandler, billingHandler}, allowlistChecker(siteOrigins), googleAuthHandler)
+	mountPublicRoutes(mux, publicHandler, allowlistChecker(publicOrigins))
 	if googleAuthHandler != nil {
 		// Deliberately NOT behind corsMiddleware, same reasoning as
 		// onagent's own main.go: these are top-level browser navigations
@@ -178,6 +235,26 @@ func mountCredentialedRoutes(mux *http.ServeMux, console routeRegistrar, siteOri
 	mux.Handle("/auth/", siteCORS(consoleMux))
 }
 
+// mountPublicRoutes mounts the anonymous consumer-page API under /public/ with
+// its own CORS policy: separate allowlist, no credentials. Kept apart from
+// the credentialed /console/ and /auth/ group on purpose.
+func mountPublicRoutes(mux *http.ServeMux, h routeRegistrar, origins func(string) bool) {
+	publicMux := http.NewServeMux()
+	h.Register(publicMux)
+	mux.Handle("/public/", public.CORS(origins)(publicMux))
+}
+
+// splitOrigins parses a comma-separated origin list, dropping blanks.
+func splitOrigins(raw string) []string {
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 // corsMiddleware builds a CORS middleware bound to a single origin
 // allowlist — see onagent's own cmd/server/main.go corsMiddleware for the
 // full reasoning (only ever echoes back a matched origin, never "*", since
@@ -193,6 +270,7 @@ func corsMiddleware(allowed func(string) bool) func(http.Handler) http.Handler {
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Onagent-Sync")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return

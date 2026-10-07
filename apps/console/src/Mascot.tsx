@@ -1,4 +1,4 @@
-import type { MascotId } from './mockData.ts'
+import type { MascotId } from './model.ts'
 
 interface MascotProps {
   id: MascotId
@@ -10,7 +10,7 @@ interface MascotProps {
 // rounded blob body + face, distinguished mainly by ears/silhouette, so
 // they read consistently as "the same character set" even though a given
 // business only ever shows one. `color` re-tints the body fill per
-// business (see mockData.THEME_COLORS) — the face/expression stays fixed
+// business (see model.THEME_COLORS) — the face/expression stays fixed
 // ink so it stays legible against any of the theme colors.
 export function Mascot({ id, color, size = 96 }: MascotProps) {
   return (

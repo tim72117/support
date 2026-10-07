@@ -1,65 +1,107 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import styles from './App.module.css'
 import { Mascot } from './Mascot.tsx'
-import { findBusinessBySlug, DEFAULT_DEMO_SLUG, type DemoBusiness } from './mockData.ts'
-import { useDemoChat } from './useDemoChat.ts'
+import { ApiError, fetchBusiness, type PublicBusiness } from './api.ts'
+import { brandingFor, type Branding } from './branding.ts'
+import { useChat } from './useChat.ts'
 
-function slugFromLocation(): string {
-  // Expected path shape: /support/<slug>. Falls back to the demo slug so
-  // opening this app at "/" during local dev still shows something,
-  // instead of an empty not-found screen.
+function slugFromLocation(): string | null {
+  // Expected path shape: /support/<slug>.
   const match = window.location.pathname.match(/\/support\/([^/]+)/)
-  return match?.[1] ?? DEFAULT_DEMO_SLUG
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+type BusinessState =
+  | { status: 'loading' }
+  | { status: 'notFound' }
+  | { status: 'error' }
+  | { status: 'ready'; business: PublicBusiness }
+
+// Looks the business up in the ai-support backend. Only fetches page data —
+// no onagent connection is made here.
+function useBusiness(slug: string | null): BusinessState {
+  const [state, setState] = useState<BusinessState>(slug ? { status: 'loading' } : { status: 'notFound' })
+  useEffect(() => {
+    if (!slug) return
+    let cancelled = false
+    setState({ status: 'loading' })
+    fetchBusiness(slug).then(
+      (business) => !cancelled && setState({ status: 'ready', business }),
+      (err) => {
+        if (cancelled) return
+        setState(err instanceof ApiError && err.status === 404 ? { status: 'notFound' } : { status: 'error' })
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [slug])
+  return state
 }
 
 export function App() {
   const [slug] = useState(slugFromLocation)
-  const business = findBusinessBySlug(slug)
+  const state = useBusiness(slug)
 
-  if (!business) {
+  if (state.status === 'loading') {
+    return (
+      <div className={styles.notFound}>
+        <p>載入中……</p>
+      </div>
+    )
+  }
+  if (state.status === 'notFound') {
     return (
       <div className={styles.notFound}>
         <p>找不到這個服務頁面，請確認連結是否正確。</p>
       </div>
     )
   }
+  if (state.status === 'error') {
+    return (
+      <div className={styles.notFound}>
+        <p>目前無法載入這個服務頁面，請稍後再試。</p>
+      </div>
+    )
+  }
 
-  return <BusinessChatPage business={business} />
+  return <BusinessChatPage business={state.business} />
 }
 
-function BusinessChatPage({ business }: { business: DemoBusiness }) {
-  const { started, messages, isTyping, start, send } = useDemoChat(business.greeting)
+function BusinessChatPage({ business }: { business: PublicBusiness }) {
+  const [branding] = useState(() => brandingFor(business))
+  const { started, messages, isTyping, notice, start, send } = useChat(business, branding.greeting)
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
+  const unavailable = !business.chat.available || notice?.kind === 'unavailable'
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+    listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, isTyping])
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!input.trim()) return
-    send(input)
+    const text = input.trim()
+    if (!text || isTyping || unavailable) return
+    void send(text)
     setInput('')
   }
 
   function handleSuggestion(question: string) {
     if (!started) start()
-    // Send on the next tick so the greeting message from start() is
-    // already in the list before the user's question appears after it.
-    setTimeout(() => send(question), 0)
+    void send(question)
   }
 
   return (
     <div className={styles.page}>
-      <div className={styles.brandPanel} style={{ background: business.themeColor }}>
+      <div className={styles.brandPanel} style={{ background: branding.themeColor }}>
         <div className={styles.brandBlobTop} />
         <div className={styles.brandBlobBottom} />
         <div className={styles.mascotStage}>
-          <Mascot id={business.mascot} color="#ffffff" size={104} animated />
+          <Mascot id={branding.mascot} color="#ffffff" size={104} animated />
         </div>
         <h1 className={styles.businessName}>{business.name}</h1>
-        <span className={styles.tagline}>{business.tagline}</span>
+        {branding.tagline && <span className={styles.tagline}>{branding.tagline}</span>}
       </div>
 
       <div className={styles.body}>
@@ -69,32 +111,41 @@ function BusinessChatPage({ business }: { business: DemoBusiness }) {
             <span className={styles.welcomeText}>
               點擊下方按鈕開始對話，AI 小幫手會依照 {business.name} 提供的資訊回答你的問題。
             </span>
-            <button
-              type="button"
-              className={styles.startButton}
-              style={{ background: business.themeColor }}
-              onClick={start}
-            >
-              開始對話
-            </button>
-            <div className={styles.suggestions}>
-              {business.suggestedQuestions.map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  className={styles.suggestionChip}
-                  onClick={() => handleSuggestion(q)}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
+            {unavailable ? (
+              <span className={styles.welcomeText}>目前無法服務，請稍後再試。</span>
+            ) : (
+              <button
+                type="button"
+                className={styles.startButton}
+                style={{ background: branding.themeColor }}
+                onClick={start}
+              >
+                開始對話
+              </button>
+            )}
+            {!unavailable && (
+              <div className={styles.suggestions}>
+                {branding.suggestedQuestions.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    className={styles.suggestionChip}
+                    onClick={() => handleSuggestion(q)}
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <ChatPanel
             business={business}
+            branding={branding}
             messages={messages}
             isTyping={isTyping}
+            notice={notice}
+            unavailable={unavailable}
             listRef={listRef}
             input={input}
             onInputChange={setInput}
@@ -108,16 +159,22 @@ function BusinessChatPage({ business }: { business: DemoBusiness }) {
 
 function ChatPanel({
   business,
+  branding,
   messages,
   isTyping,
+  notice,
+  unavailable,
   listRef,
   input,
   onInputChange,
   onSubmit,
 }: {
-  business: DemoBusiness
-  messages: ReturnType<typeof useDemoChat>['messages']
+  business: PublicBusiness
+  branding: Branding
+  messages: ReturnType<typeof useChat>['messages']
   isTyping: boolean
+  notice: ReturnType<typeof useChat>['notice']
+  unavailable: boolean
   listRef: React.RefObject<HTMLDivElement>
   input: string
   onInputChange: (v: string) => void
@@ -133,7 +190,7 @@ function ChatPanel({
   return (
     <div className={styles.chatPanel}>
       <div className={styles.chatHeader}>
-        <Mascot id={business.mascot} color={business.themeColor} size={36} />
+        <Mascot id={branding.mascot} color={branding.themeColor} size={36} />
         <div>
           <div className={styles.chatHeaderName}>{business.name}</div>
           <span className={styles.chatHeaderStatus}>● 線上</span>
@@ -150,7 +207,7 @@ function ChatPanel({
               className={`${styles.bubble} ${
                 m.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant
               }`}
-              style={m.role === 'user' ? { background: business.themeColor } : undefined}
+              style={m.role === 'user' ? { background: branding.themeColor } : undefined}
             >
               {m.text}
             </div>
@@ -169,6 +226,12 @@ function ChatPanel({
         )}
       </div>
 
+      {notice && (
+        <span className={styles.notice} role="alert">
+          {notice.text}
+        </span>
+      )}
+
       <form className={styles.composer} onSubmit={onSubmit}>
         <textarea
           className={styles.composerInput}
@@ -177,12 +240,14 @@ function ChatPanel({
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          disabled={unavailable}
+          maxLength={business.maxMessageLength}
         />
         <button
           type="submit"
           className={styles.sendButton}
-          style={{ background: business.themeColor }}
-          disabled={!input.trim()}
+          style={{ background: branding.themeColor }}
+          disabled={!input.trim() || isTyping || unavailable}
         >
           ➤
         </button>

@@ -5,6 +5,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -34,9 +35,9 @@ func Open(dsn string) (*gorm.DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("db: ping: %w", err)
 	}
-	if _, err := sqlDB.Exec(schemaSQL); err != nil {
+	if err := applySchema(sqlDB); err != nil {
 		sqlDB.Close()
-		return nil, fmt.Errorf("db: apply schema: %w", err)
+		return nil, err
 	}
 
 	gormDB, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB, DriverName: "postgres"}), &gorm.Config{
@@ -48,6 +49,32 @@ func Open(dsn string) (*gorm.DB, error) {
 	}
 
 	return gormDB, nil
+}
+
+// schemaLockKey is an arbitrary application-wide Postgres advisory lock id.
+const schemaLockKey int64 = 0x61695f737570706f // "ai_suppo"
+
+// applySchema runs schema.sql under an advisory lock. The statements are
+// idempotent, but ALTER TABLE takes strong table locks, so two processes
+// applying the schema at the same moment (several instances starting
+// together, or test packages running in parallel) can deadlock each other.
+// The lock makes them take turns. It is session-scoped, so it is taken and
+// released on one dedicated connection.
+func applySchema(sqlDB *sql.DB) error {
+	ctx := context.Background()
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("db: schema connection: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", schemaLockKey); err != nil {
+		return fmt.Errorf("db: take schema lock: %w", err)
+	}
+	defer conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", schemaLockKey)
+	if _, err := conn.ExecContext(ctx, schemaSQL); err != nil {
+		return fmt.Errorf("db: apply schema: %w", err)
+	}
+	return nil
 }
 
 // newGormLogger mirrors GORM's own default (Warn level, slow-query

@@ -32,6 +32,7 @@ p { margin: 0 0 1em; }
 .nav .links a { text-decoration: none; color: var(--ink-dim); }
 .nav .links a:hover { color: var(--ink); }
 .nav .links a.btn { color: var(--brand-ink); }
+.nav .links a.btn.ghost { color: var(--ink); }
 .btn { display: inline-block; padding: 12px 24px; border-radius: 999px; background: var(--brand); color: var(--brand-ink); text-decoration: none; border: 2px solid var(--brand); cursor: pointer; font: inherit; font-weight: 700; }
 .btn:hover { background: var(--brand-strong); border-color: var(--brand-strong); }
 .btn.ghost { background: transparent; color: var(--ink); border-color: var(--border); }

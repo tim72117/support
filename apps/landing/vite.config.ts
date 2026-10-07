@@ -8,6 +8,7 @@ import { resolve } from 'node:path'
 export default defineConfig({
   server: {
     port: 5176,
+    strictPort: true,
   },
   build: {
     rollupOptions: {

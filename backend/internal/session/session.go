@@ -45,6 +45,9 @@ var ErrEmailTaken = errors.New("an account with this email already exists")
 // the email fails emailRE's format check.
 var ErrInvalidEmail = errors.New("invalid email address")
 
+// ErrPasswordTooShort is returned by Register for a password under 8 characters.
+var ErrPasswordTooShort = errors.New("password must be at least 8 characters")
+
 // User is the caller-facing shape of an authenticated account. Never
 // includes the password hash.
 type User struct {
@@ -115,7 +118,7 @@ func (s *Store) Register(email, password string) (*User, error) {
 		return nil, ErrInvalidEmail
 	}
 	if len(password) < 8 {
-		return nil, fmt.Errorf("password must be at least 8 characters")
+		return nil, ErrPasswordTooShort
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)

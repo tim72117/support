@@ -1,6 +1,6 @@
 -- ai-support 自己的資料庫 schema——只管業主帳號、登入、業主底下的服務
--- （business）與其內容設定。實際的 LLM 推理/tool-calling 完全由 onagent
--- 負責，這裡不存任何 tool schema 或對話紀錄。
+-- （business）與其內容設定，以及消費端對話的紀錄（conversations/messages）。
+-- 實際的 LLM 推理完全由 onagent 負責，這裡不存任何 tool schema。
 
 CREATE TABLE IF NOT EXISTS users (
     id            BIGSERIAL PRIMARY KEY,
@@ -150,3 +150,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS payments_order_number_idx ON payments (order_n
 -- 結果不明（逾時）的扣款在人工對帳前不會被再扣一次。
 CREATE UNIQUE INDEX IF NOT EXISTS payments_one_pending_per_user_idx
     ON payments (user_id) WHERE status = 'pending';
+
+-- ---------------------------------------------------------------------
+-- 消費端對話紀錄。匿名訪客的訊息先送到本後端（記錄 + 額度把關），後端回傳後
+-- 瀏覽器才轉送 onagent；AI 的回覆由瀏覽器回報（見 internal/public）。
+-- conversations.id 是不可猜的隨機字串，兼作該段對話的匿名憑證。
+-- ---------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id          TEXT PRIMARY KEY,
+    business_id BIGINT NOT NULL REFERENCES businesses (id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS conversations_business_id_idx ON conversations (business_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id              BIGSERIAL PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
+    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content         TEXT NOT NULL,
+    reply_to        BIGINT REFERENCES messages (id) ON DELETE CASCADE, -- assistant 訊息指向它回覆的 user 訊息
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS messages_conversation_id_idx ON messages (conversation_id, id);
+
+-- 每則 user 訊息最多只接受一則回覆：限制瀏覽器回報（可偽造）所能灌入的量。
+CREATE UNIQUE INDEX IF NOT EXISTS messages_one_reply_idx ON messages (reply_to) WHERE reply_to IS NOT NULL;
+
+-- ---------------------------------------------------------------------
+-- 服務的外觀設定與編輯器狀態（後台「形象設定」與「AI 可以回答的內容」分類卡片）
+-- ---------------------------------------------------------------------
+-- 先檢查欄位是否已存在才 ALTER：ALTER TABLE 即使欄位已在也會先取得資料表的排他鎖，
+-- 每次啟動都執行會讓正在服務的連線被卡住，多個程序同時啟動時還可能互相死結。
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'businesses' AND column_name = 'tagline') THEN
+        ALTER TABLE businesses ADD COLUMN tagline TEXT NOT NULL DEFAULT '';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'businesses' AND column_name = 'mascot') THEN
+        ALTER TABLE businesses ADD COLUMN mascot TEXT NOT NULL DEFAULT 'fox';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'businesses' AND column_name = 'theme_color') THEN
+        ALTER TABLE businesses ADD COLUMN theme_color TEXT NOT NULL DEFAULT '#FF8A5B';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'business_content' AND column_name = 'sections') THEN
+        ALTER TABLE business_content ADD COLUMN sections TEXT;
+    END IF;
+END $$;

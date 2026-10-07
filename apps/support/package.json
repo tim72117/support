@@ -2,7 +2,7 @@
   "name": "@ai-support/support",
   "version": "0.1.0",
   "private": true,
-  "description": "Consumer-facing chat page: one public page per business (by slug), embedding @onagent/bridge directly — no ai-support backend in the loop for the conversation itself.",
+  "description": "Consumer-facing chat page: one public page per business (by slug). Messages go to the ai-support backend first (record + quota), then are forwarded to onagent from the browser with @onagent/bridge.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@onagent/bridge": "^0.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -1,21 +1,36 @@
 import { useState, type FormEvent } from 'react'
 import styles from './Login.module.css'
-import { useMockBackend } from './MockBackendContext.tsx'
+import { useBackend } from './BackendContext.tsx'
 import { Mascot } from './Mascot.tsx'
 
-// Fake login: any email/password combination "works" and just stores the
-// email in the mock session. This is the front-end-first build — real
-// register/login wiring against internal/session comes later (see
-// docs/refactor-initial-scaffold-plan-2026-09-27.md item 1).
+// Real login / register against the backend (/auth/login, /auth/register).
+// Same email trimmed for the "can submit" check and the request, and the
+// password is sent exactly as typed (never trimmed).
 export function Login() {
-  const { login } = useMockBackend()
+  const { login, register } = useBackend()
+  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  function handleSubmit(e: FormEvent) {
+  const trimmedEmail = email.trim()
+  const canSubmit = trimmedEmail !== '' && password !== '' && !busy
+  const isRegister = mode === 'register'
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!email.trim()) return
-    login(email.trim())
+    if (!canSubmit) return
+    setBusy(true)
+    setError('')
+    try {
+      await (isRegister ? register : login)(trimmedEmail, password)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '發生錯誤，請稍後再試')
+      setBusy(false)
+    }
+    // On success the whole screen is replaced by the console, so there is
+    // nothing to reset here.
   }
 
   return (
@@ -24,7 +39,7 @@ export function Login() {
         <div className={styles.brandRow}>
           <Mascot id="fox" color="#ff8a5b" size={72} />
         </div>
-        <h1 className={styles.title}>歡迎回來</h1>
+        <h1 className={styles.title}>{isRegister ? '建立帳號' : '歡迎回來'}</h1>
         <span className={styles.subtitle}>
           登入管理你的 AI 客服小幫手，設定顧客可以問到的內容。
         </span>
@@ -50,17 +65,36 @@ export function Login() {
             <input
               id="password"
               type="password"
+              required
               className={styles.input}
-              placeholder="輸入密碼"
+              placeholder={isRegister ? '至少 8 個字元' : '輸入密碼'}
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
-          <button type="submit" className={styles.submit}>
-            登入
+          {error && (
+            <span className={styles.error} role="alert">
+              {error}
+            </span>
+          )}
+          <button type="submit" className={styles.submit} disabled={!canSubmit}>
+            {busy ? '請稍候…' : isRegister ? '註冊並登入' : '登入'}
           </button>
         </form>
-        <span className={styles.hint}>示範版本：輸入任何信箱即可登入體驗</span>
+        <span className={styles.hint}>
+          {isRegister ? '已經有帳號？' : '還沒有帳號？'}
+          <button
+            type="button"
+            className={styles.switchMode}
+            onClick={() => {
+              setMode(isRegister ? 'login' : 'register')
+              setError('')
+            }}
+          >
+            {isRegister ? '改為登入' : '建立帳號'}
+          </button>
+        </span>
       </div>
     </div>
   )

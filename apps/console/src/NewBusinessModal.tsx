@@ -1,49 +1,68 @@
 import { useState } from 'react'
 import styles from './BusinessList.module.css'
+import { ApiError } from './api.ts'
+import { useBackend } from './BackendContext.tsx'
 import { Mascot } from './Mascot.tsx'
-import { createBlankBusiness, MASCOT_LABELS, THEME_COLORS, type MascotId } from './mockData.ts'
-import type { Business } from './mockData.ts'
+import {
+  isValidSlug,
+  MASCOT_LABELS,
+  SLUG_MAX_LENGTH,
+  suggestSlug,
+  THEME_COLORS,
+  type Business,
+  type MascotId,
+} from './model.ts'
 
 interface NewBusinessModalProps {
   onCancel: () => void
-  onCreate: (business: Business) => void
+  onCreated: (business: Business) => void
 }
 
-function slugify(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9一-鿿]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
-
-export function NewBusinessModal({ onCancel, onCreate }: NewBusinessModalProps) {
+export function NewBusinessModal({ onCancel, onCreated }: NewBusinessModalProps) {
+  const { createBusiness } = useBackend()
   const [name, setName] = useState('')
+  const [slug, setSlug] = useState('')
+  // Until the owner edits the URL themselves, it follows the name.
+  const [slugTouched, setSlugTouched] = useState(false)
   const [mascot, setMascot] = useState<MascotId>('fox')
   const [themeColor, setThemeColor] = useState<string>(THEME_COLORS[0])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
-  // Same trimmed value used for both the "can submit" check and the actual
-  // create below — deliberately not two separate checks, so this can't
-  // drift into "looked valid, saved with trailing whitespace anyway"
-  // (see docs/refactor-initial-scaffold-plan-2026-09-27.md's known-pitfalls list).
+  // The same trimmed values are used for the "can create" check and for the
+  // request itself — deliberately not two separate checks, so this can't
+  // drift into "looked valid, saved with trailing whitespace anyway".
   const trimmedName = name.trim()
-  const canCreate = trimmedName.length > 0
+  const trimmedSlug = slug.trim()
+  const slugOk = isValidSlug(trimmedSlug)
+  const canCreate = trimmedName.length > 0 && slugOk && !busy
 
-  function handleCreate() {
+  function onNameChange(value: string) {
+    setName(value)
+    if (!slugTouched) setSlug(suggestSlug(value))
+  }
+
+  async function handleCreate() {
     if (!canCreate) return
-    onCreate(
-      createBlankBusiness({
-        name: trimmedName,
-        slug: slugify(trimmedName) || `business-${Date.now()}`,
-        tagline: '',
-        mascot,
-        themeColor,
-      }),
-    )
+    setBusy(true)
+    setError('')
+    try {
+      const created = await createBusiness({ slug: trimmedSlug, name: trimmedName, mascot, themeColor })
+      onCreated(created)
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 409
+          ? '這個網址已經被使用了，請換一個。'
+          : err instanceof Error
+            ? err.message
+            : '建立失敗，請稍後再試。',
+      )
+      setBusy(false)
+    }
   }
 
   return (
-    <div className={styles.overlay} onClick={onCancel}>
+    <div className={styles.overlay} onClick={busy ? undefined : onCancel}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <h2 className={styles.modalTitle}>建立新的服務</h2>
 
@@ -56,9 +75,33 @@ export function NewBusinessModal({ onCancel, onCreate }: NewBusinessModalProps) 
             className={styles.input}
             placeholder="例如：晨光烘焙坊"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => onNameChange(e.target.value)}
             autoFocus
           />
+        </div>
+
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="biz-slug">
+            對外網址
+          </label>
+          <input
+            id="biz-slug"
+            className={styles.input}
+            placeholder="例如：chenguang-bakery"
+            value={slug}
+            maxLength={SLUG_MAX_LENGTH}
+            autoCapitalize="none"
+            spellCheck={false}
+            onChange={(e) => {
+              setSlugTouched(true)
+              setSlug(e.target.value.toLowerCase())
+            }}
+          />
+          <span className={`${styles.hintLine} ${trimmedSlug && !slugOk ? styles.hintError : ''}`}>
+            {trimmedSlug && !slugOk
+              ? '只能使用小寫英文字母、數字與連字號（-），並以英文字母或數字開頭。'
+              : `顧客會從 /support/${trimmedSlug || '你的網址'} 進來，建立後無法修改。`}
+          </span>
         </div>
 
         <div className={styles.field}>
@@ -95,17 +138,18 @@ export function NewBusinessModal({ onCancel, onCreate }: NewBusinessModalProps) 
           </div>
         </div>
 
+        {error && (
+          <span className={styles.modalError} role="alert">
+            {error}
+          </span>
+        )}
+
         <div className={styles.modalActions}>
-          <button type="button" className={styles.cancelButton} onClick={onCancel}>
+          <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>
             取消
           </button>
-          <button
-            type="button"
-            className={styles.confirmButton}
-            onClick={handleCreate}
-            disabled={!canCreate}
-          >
-            建立
+          <button type="button" className={styles.confirmButton} onClick={handleCreate} disabled={!canCreate}>
+            {busy ? '建立中…' : '建立'}
           </button>
         </div>
       </div>

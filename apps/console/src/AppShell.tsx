@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import styles from './AppShell.module.css'
-import { useMockBackend } from './MockBackendContext.tsx'
+import { useBackend } from './BackendContext.tsx'
 
 interface AppShellProps {
   children: ReactNode
@@ -9,7 +9,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, onNavigateHome, showBackButton }: AppShellProps) {
-  const { session, logout } = useMockBackend()
+  const { session, logout } = useBackend()
 
   return (
     <div className={styles.shell}>

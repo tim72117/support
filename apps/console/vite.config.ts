@@ -8,7 +8,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5174,
+    port: 5177,
+    strictPort: true, // 5173-5175 belong to other projects on this machine; fail loudly instead of drifting
   },
   test: {
     environment: 'jsdom',
