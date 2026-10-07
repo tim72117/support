@@ -69,7 +69,7 @@ jobs:
       # less to add to the dependency surface for what's otherwise a
       # hand-rolled gcloud-only workflow.
       - name: Register WIF identity with gcloud CLI
-        run: gcloud auth login --brief --cred-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+        run: gcloud auth login --quiet --brief --cred-file="${GOOGLE_APPLICATION_CREDENTIALS}"
 
       # skip_build 只在 workflow_dispatch 觸發時才可能是 true(tag push
       # 觸發沒有這個 input,github.event.inputs.skip_build 會是空字串,
