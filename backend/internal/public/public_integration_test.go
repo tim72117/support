@@ -22,6 +22,7 @@ import (
 	"github.com/tim72117/ai-support/internal/onagentclient"
 	"github.com/tim72117/ai-support/internal/public"
 	"github.com/tim72117/ai-support/internal/quota"
+	"github.com/tim72117/ai-support/internal/reservation"
 	"github.com/tim72117/ai-support/internal/session"
 )
 
@@ -269,6 +270,86 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	}
 	if st, _ := quotaSvc.StandingFor(t.Context(), owner.ID); st.Used != 8 {
 		t.Fatalf("ledger changed after delete: %d", st.Used)
+	}
+}
+
+// Covers the marketing site's anonymous "book a demo / talk to sales" lead
+// form: a normal submission, each required-field error, and the per-IP rate
+// limit (set to 10/min in NewHandler).
+func TestPublicReservations(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	gdb, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store := reservation.New(gdb)
+	pub := public.NewHandler(public.Config{Reservations: store, Log: log})
+	mux := http.NewServeMux()
+	pub.Register(mux)
+
+	var ids []int64
+	t.Cleanup(func() {
+		for _, id := range ids {
+			gdb.Exec("DELETE FROM reservations WHERE id = ?", id)
+		}
+	})
+
+	doFrom := func(ip, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/public/reservations", strings.NewReader(body))
+		req.RemoteAddr = ip + ":1"
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	suffix := time.Now().UnixNano()
+	contact := fmt.Sprintf("lead-%d@example.com", suffix)
+
+	// 1. a normal submission succeeds and is stored.
+	rec := doFrom("198.51.100.1", fmt.Sprintf(
+		`{"productLine":"candidate","tier":"starter","name":"王小明","contact":%q,"message":"想了解細節"}`, contact))
+	if rec.Code != 200 {
+		t.Fatalf("submit: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct{ ID int64 }
+	json.Unmarshal(rec.Body.Bytes(), &created)
+	if created.ID == 0 {
+		t.Fatalf("no id in response: %s", rec.Body.String())
+	}
+	ids = append(ids, created.ID)
+
+	// 2. missing contact (and missing name) are rejected as invalid_request.
+	if rec = doFrom("198.51.100.2", `{"productLine":"business","name":"Jane"}`); rec.Code != 400 || !strings.Contains(rec.Body.String(), "invalid_request") {
+		t.Fatalf("missing contact: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = doFrom("198.51.100.2", `{"productLine":"business","contact":"x@x.com"}`); rec.Code != 400 || !strings.Contains(rec.Body.String(), "invalid_request") {
+		t.Fatalf("missing name: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. invalid product line is also invalid_request.
+	if rec = doFrom("198.51.100.2", `{"productLine":"nope","name":"x","contact":"x@x.com"}`); rec.Code != 400 {
+		t.Fatalf("invalid product line: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 4. rate limit: ipReserve allows 10/min; the 11th request from the same
+	// IP within the window is rejected even though earlier ones in this test
+	// already consumed some of that IP's budget.
+	limited := "198.51.100.3"
+	var lastCode int
+	for i := 0; i < 11; i++ {
+		rec = doFrom(limited, fmt.Sprintf(`{"productLine":"business","name":"x","contact":"x%d@x.com"}`, i))
+		lastCode = rec.Code
+		if rec.Code == 200 {
+			var r struct{ ID int64 }
+			json.Unmarshal(rec.Body.Bytes(), &r)
+			ids = append(ids, r.ID)
+		}
+	}
+	if lastCode != 429 {
+		t.Fatalf("expected the 11th request to be rate limited, got %d", lastCode)
 	}
 }
 

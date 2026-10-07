@@ -29,6 +29,7 @@ import (
 	"github.com/tim72117/ai-support/internal/onagentclient"
 	"github.com/tim72117/ai-support/internal/public"
 	"github.com/tim72117/ai-support/internal/quota"
+	"github.com/tim72117/ai-support/internal/reservation"
 	"github.com/tim72117/ai-support/internal/session"
 	"github.com/tim72117/ai-support/internal/tappay"
 )
@@ -104,8 +105,18 @@ func main() {
 	dsn := envOr("DATABASE_URL", "postgres://platform:platform@localhost:5434/platform?sslmode=disable")
 	gormDB, err := db.Open(dsn)
 	if err != nil {
-		log.Error("failed to open database", "err", err)
-		os.Exit(1)
+		// TEMPORARY: this used to be a fatal os.Exit(1) — a database is a
+		// hard dependency of nearly everything below (session, business,
+		// quota, billing, admin all need it). Downgraded to a warning only
+		// to let the very first Cloud Run deploy succeed and get a domain
+		// mapping set up before a real cloud Postgres exists; every request
+		// that touches the database will fail once gormDB is nil (gorm
+		// returns an error from a nil *gorm.DB rather than panicking, so
+		// this doesn't crash the process — it just makes every DB-backed
+		// route respond with an error). Revert this to the fatal exit once
+		// DATABASE_URL points at a real reachable database — a server that
+		// silently can't store anything is not a valid steady state.
+		log.Error("failed to open database; continuing to start anyway (TEMPORARY, see comment) — every database-backed route will fail", "err", err)
 	}
 
 	cookieSecure := os.Getenv("COOKIE_SECURE") == "true"
@@ -153,6 +164,7 @@ func main() {
 		Businesses:   businessStore,
 		Chats:        chatStore,
 		Quota:        quotaSvc,
+		Reservations: reservation.New(gormDB),
 		OnagentWSURL: onagentWSURL,
 		TrustProxy:   os.Getenv("PUBLIC_TRUST_PROXY") == "true",
 		Log:          log,

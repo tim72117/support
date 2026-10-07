@@ -202,3 +202,20 @@ BEGIN
         ALTER TABLE business_content ADD COLUMN sections TEXT;
     END IF;
 END $$;
+
+-- ---------------------------------------------------------------------
+-- 行銷頁「預約／諮詢」表單（apps/landing 的 reserve.html）。這是未登入訪客
+-- 送出的意向資料，不是帳號，也不經過任何付款流程——單純讓平台方事後主動
+-- 聯絡。故意不設任何唯一性限制：同一人針對不同方案留言多次是合理的。
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reservations (
+    id           BIGSERIAL PRIMARY KEY,
+    product_line TEXT NOT NULL,          -- 'candidate' | 'business'，對應 apps/landing 的兩條產品線
+    tier         TEXT NOT NULL DEFAULT '', -- 對應方案頁的 plan key（例如 starter），可為空
+    name         TEXT NOT NULL,
+    contact      TEXT NOT NULL,          -- Email 或電話，自由格式
+    message      TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS reservations_created_at_idx ON reservations (created_at DESC);

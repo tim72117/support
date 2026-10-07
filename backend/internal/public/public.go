@@ -35,6 +35,7 @@ import (
 	"github.com/tim72117/ai-support/internal/business"
 	"github.com/tim72117/ai-support/internal/conversation"
 	"github.com/tim72117/ai-support/internal/quota"
+	"github.com/tim72117/ai-support/internal/reservation"
 )
 
 const (
@@ -47,8 +48,9 @@ const (
 	// MaxMessagesPerConversation bounds one conversation's visitor messages.
 	MaxMessagesPerConversation = 100
 
-	maxChatBody  = 8 << 10
-	maxReplyBody = 64 << 10
+	maxChatBody        = 8 << 10
+	maxReplyBody       = 64 << 10
+	maxReservationBody = 8 << 10
 )
 
 // Error codes returned in {"error":{"code":...}}; the frontend branches on them.
@@ -84,6 +86,10 @@ type quotaService interface {
 	Record(ctx context.Context, businessID, userID int64, eventID string, usage *quota.Usage) error
 }
 
+type reservationStore interface {
+	Create(in reservation.Input) (int64, error)
+}
+
 // Config wires a Handler.
 type Config struct {
 	Businesses businessLookup
@@ -91,6 +97,10 @@ type Config struct {
 	// Quota may be a nil *quota.Service (QUOTA_ENABLED=false): checks always
 	// allow and records are no-ops.
 	Quota quotaService
+	// Reservations backs POST /public/reservations (the marketing site's
+	// "book a demo / talk to sales" form). May be nil, in which case that
+	// route reports itself unavailable instead of panicking.
+	Reservations reservationStore
 	// OnagentWSURL is what the browser's bridge connects to; empty means
 	// onagent integration is off and chat is reported unavailable.
 	OnagentWSURL string
@@ -100,12 +110,13 @@ type Config struct {
 }
 
 type Handler struct {
-	cfg      Config
-	ipChat   *limiter
-	ipReply  *limiter
-	convChat *limiter
-	ipTool   *limiter
-	log      *slog.Logger
+	cfg       Config
+	ipChat    *limiter
+	ipReply   *limiter
+	convChat  *limiter
+	ipTool    *limiter
+	ipReserve *limiter
+	log       *slog.Logger
 }
 
 func NewHandler(cfg Config) *Handler {
@@ -127,7 +138,11 @@ func NewHandler(cfg Config) *Handler {
 		// trigger several tool calls (list, then one read per relevant
 		// section) before the AI's reply is ready.
 		ipTool: newLimiter(120, time.Minute),
-		log:    log,
+		// ipReserve bounds the "book a demo" lead form: generous enough for a
+		// real visitor submitting for a couple of plans, tight enough that a
+		// script cannot flood the reservations table from one IP.
+		ipReserve: newLimiter(10, time.Minute),
+		log:       log,
 	}
 }
 
@@ -139,6 +154,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /public/businesses/{slug}/chat/reply", h.reply)
 	mux.HandleFunc("GET /public/businesses/{slug}/sections", h.listSections)
 	mux.HandleFunc("GET /public/businesses/{slug}/sections/{id}", h.getSection)
+	mux.HandleFunc("POST /public/reservations", h.createReservation)
 }
 
 // --- GET /public/businesses/{slug} ------------------------------------------
@@ -398,6 +414,59 @@ func (h *Handler) reply(w http.ResponseWriter, r *http.Request) {
 		h.log.Error("record completion usage", "business", b.ID, "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messageId": replyID})
+}
+
+// --- POST /public/reservations -----------------------------------------------
+//
+// The marketing site's "book a demo / talk to sales" form (apps/landing's
+// reserve.html, one per product line). Anonymous and cookie-less like the
+// rest of this package, but unlike chat/reply it is not tied to any business
+// or conversation — it is a standalone lead for the platform operator to
+// follow up with by hand, so there is no slug lookup and no quota check.
+
+type reservationRequest struct {
+	ProductLine string `json:"productLine"`
+	Tier        string `json:"tier"`
+	Name        string `json:"name"`
+	Contact     string `json:"contact"`
+	Message     string `json:"message"`
+}
+
+func (h *Handler) createReservation(w http.ResponseWriter, r *http.Request) {
+	if !h.ipReserve.allow(clientIP(r, h.cfg.TrustProxy)) {
+		writeError(w, http.StatusTooManyRequests, CodeRateLimited, "請求太頻繁，請稍後再試。")
+		return
+	}
+	if h.cfg.Reservations == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeUnavailable, "目前無法服務。")
+		return
+	}
+	var req reservationRequest
+	if !decode(w, r, maxReservationBody, &req) {
+		return
+	}
+	in := reservation.Input{
+		ProductLine: strings.TrimSpace(req.ProductLine),
+		Tier:        strings.TrimSpace(req.Tier),
+		Name:        strings.TrimSpace(req.Name),
+		Contact:     strings.TrimSpace(req.Contact),
+		Message:     strings.TrimSpace(req.Message),
+	}
+	id, err := h.cfg.Reservations.Create(in)
+	switch {
+	case errors.Is(err, reservation.ErrInvalidProductLine),
+		errors.Is(err, reservation.ErrNameRequired),
+		errors.Is(err, reservation.ErrContactRequired):
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "請填寫姓名與聯絡方式（Email 或電話）。")
+		return
+	case errors.Is(err, reservation.ErrTooLong):
+		writeError(w, http.StatusBadRequest, CodeContentTooLong, "內容過長，請縮短後再試。")
+		return
+	case err != nil:
+		h.internal(w, "create reservation", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
 // --- usage estimation --------------------------------------------------------

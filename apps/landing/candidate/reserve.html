@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>預約諮詢｜有問必答 選舉版</title>
+  <link rel="stylesheet" href="../assets/base.css" />
+  <link rel="stylesheet" href="./theme.css" />
+  <style>
+    .signup { max-width: 560px; margin: 0 auto; }
+    label.field { display: block; margin-bottom: 16px; font-weight: 700; font-size: .95rem; }
+    label.field input:not([type=radio]), label.field select, label.field textarea { display: block; width: 100%; margin-top: 6px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; font: inherit; background: #fff; }
+    label.field input:focus, label.field select:focus, label.field textarea:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+    label.field textarea { resize: vertical; min-height: 90px; }
+    .summary { background: var(--brand-wash); border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: 16px; }
+    .done { text-align: center; max-width: 560px; margin: 40px auto 0; }
+    .done .actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+    .banner { border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 20px; background: var(--accent-wash); font-size: .9rem; }
+    .msg-error { color: #c0392b; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .linkbtn { background: none; border: none; padding: 0; color: var(--brand-strong); text-decoration: underline; cursor: pointer; font: inherit; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="logo" href="../index.html">有問必答 <span class="badge-ai" style="margin-left:4px">選舉版</span></a>
+      <div class="links"><a href="./subscribe.html">← 重新選擇方案</a><a class="btn ghost sm" data-console-link href="http://localhost:5177">登入</a></div>
+    </nav>
+  </div>
+
+  <main class="wrap" style="padding-bottom:48px">
+    <div class="section-title" style="padding-top:24px" id="formTitle">
+      <h1>預約諮詢</h1>
+      <p>留下你的聯絡方式，我們會盡快與你聯繫，協助你評估適合的方案。</p>
+    </div>
+
+    <div class="banner" id="banner" hidden></div>
+
+    <form id="reserveform" class="signup" novalidate>
+      <div class="summary" id="summary" aria-live="polite" hidden></div>
+
+      <label class="field">姓名<input type="text" name="name" autocomplete="name" required /></label>
+      <label class="field">Email<input type="email" name="email" autocomplete="email" placeholder="至少填寫 Email 或電話其中一項" /></label>
+      <label class="field">電話<input type="tel" name="phone" inputmode="tel" autocomplete="tel" placeholder="至少填寫 Email 或電話其中一項" /></label>
+      <label class="field">想了解的方案
+        <select name="tier" id="tierSelect">
+          <option value="">尚未決定／其他</option>
+          <option value="candidate_trial">7 天免費試用</option>
+          <option value="starter">參選起步</option>
+          <option value="campaign">競選衝刺</option>
+        </select>
+      </label>
+      <label class="field">留言（選填）<textarea name="message" placeholder="想了解的細節、團隊規模、選舉時程等都可以留言告訴我們"></textarea></label>
+
+      <p id="error" class="note msg-error" role="alert" hidden></p>
+      <button class="btn" type="submit" id="submitBtn" style="width:100%">送出預約</button>
+    </form>
+
+    <div class="done card" id="done" hidden>
+      <h2>已收到你的預約</h2>
+      <p id="doneText">我們已收到你的資料，會盡快與你聯絡。</p>
+      <div class="actions">
+        <a class="btn" id="goPay" href="#">我想直接完成付款</a>
+        <a class="btn ghost" href="./subscribe.html">回到方案頁</a>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // 後端與管理後台的位址；開發時可用 ?api=...&console=... 覆寫，與其他頁面一致。
+    const params = new URLSearchParams(location.search)
+    const API = (params.get('api') || 'http://localhost:8082').replace(/\/+$/, '')
+    const CONSOLE_URL = params.get('console') || 'http://localhost:5177'
+
+    // 方案名稱僅供畫面顯示，需與 subscribe.html 的方案卡片一致。
+    const PLAN_NAMES = {
+      candidate_trial: '7 天免費試用',
+      starter: '參選起步',
+      campaign: '競選衝刺',
+    }
+
+    const $ = (id) => document.getElementById(id)
+    const form = $('reserveform')
+    const err = $('error')
+    const state = { busy: false }
+
+    async function api(path, opts = {}) {
+      let res
+      try {
+        res = await fetch(API + path, {
+          method: opts.method || (opts.body ? 'POST' : 'GET'),
+          headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+        })
+      } catch {
+        throw Object.assign(new Error('連不上伺服器，請稍後再試'), { status: 0 })
+      }
+      const text = await res.text()
+      if (!res.ok) throw Object.assign(new Error(text.trim() || 'HTTP ' + res.status), { status: res.status })
+      return text ? JSON.parse(text) : null
+    }
+
+    function showError(msg) { err.textContent = msg; err.hidden = !msg }
+    function showBanner(msg) { $('banner').textContent = msg; $('banner').hidden = !msg }
+
+    // ?plan=xxx 帶入是從方案頁點進來的情境：預先選好下拉選單並顯示摘要，
+    // 讓使用者知道這是接續他剛才看的方案。直接貼網址進來則不顯示摘要，
+    // 下拉選單維持「尚未決定／其他」。
+    const planKey = params.get('plan')
+    if (planKey && PLAN_NAMES[planKey]) {
+      $('tierSelect').value = planKey
+      $('summary').textContent = '想了解的方案：' + PLAN_NAMES[planKey]
+      $('summary').hidden = false
+    }
+
+    function payHref(tier) {
+      const t = tier || planKey || ''
+      let href = './pay.html'
+      const qs = new URLSearchParams()
+      if (t) qs.set('plan', t)
+      if (params.get('api')) qs.set('api', params.get('api'))
+      if (params.get('console')) qs.set('console', params.get('console'))
+      const s = qs.toString()
+      return s ? href + '?' + s : href
+    }
+
+    const submitErrors = {
+      429: '請求太頻繁，請稍後再試。',
+      503: '預約功能目前無法使用，請稍後再試，或直接完成付款。',
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      if (state.busy) return
+      showError('')
+      const name = form.elements.name.value.trim()
+      const email = form.elements.email.value.trim()
+      const phone = form.elements.phone.value.trim()
+      const tier = form.elements.tier.value
+      const message = form.elements.message.value.trim()
+
+      if (!name) return showError('請填寫姓名。')
+      if (!email && !phone) return showError('請至少填寫 Email 或電話其中一項。')
+      if (email && !/^\S+@\S+\.\S+$/.test(email)) return showError('請填寫正確的 Email。')
+
+      const contact = [email, phone].filter(Boolean).join(' / ')
+
+      state.busy = true; $('submitBtn').disabled = true; $('submitBtn').textContent = '送出中…'
+      try {
+        await api('/public/reservations', {
+          body: { productLine: 'candidate', tier, name, contact, message },
+        })
+        $('goPay').href = payHref(tier)
+        form.hidden = true
+        showBanner('')
+        $('done').hidden = false
+      } catch (e2) {
+        showError(submitErrors[e2.status] || e2.message || '送出時發生錯誤，請稍後再試。')
+      } finally {
+        state.busy = false; $('submitBtn').disabled = false; $('submitBtn').textContent = '送出預約'
+      }
+    })
+  </script>
+  <script type="module" src="../assets/site.js"></script>
+</body>
+</html>
