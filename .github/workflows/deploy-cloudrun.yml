@@ -53,23 +53,23 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-      # auth@v2 with create_credentials_file:true (the default) only writes
-      # the external_account credential file and exports
-      # GOOGLE_APPLICATION_CREDENTIALS — it does NOT register that identity
-      # with the gcloud CLI itself (`gcloud auth list` stays empty, as a
-      # debug step confirmed: "No credentialed accounts", and both
-      # `gcloud auth print-access-token` and the ADC equivalent errored).
-      # `gcloud auth configure-docker` and `docker push` both go through
-      # gcloud's own active-account resolution, not bare ADC, so without
-      # this explicit login they silently fall through to an unauthenticated
-      # request — which is why Push image failed with "Unauthenticated
-      # request" on every attempt despite the Authenticate step itself
-      # reporting success. setup-gcloud@v2 would also fix this (it runs
-      # this same login internally), but a one-line `gcloud auth login` is
-      # less to add to the dependency surface for what's otherwise a
-      # hand-rolled gcloud-only workflow.
-      - name: Register WIF identity with gcloud CLI
-        run: gcloud auth login --quiet --brief --cred-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+      # auth@v2 alone only writes the external_account credential file
+      # (GOOGLE_APPLICATION_CREDENTIALS) — it does not register that
+      # identity as a gcloud CLI active account. A hand-rolled `gcloud auth
+      # login --cred-file=...` was tried here and made things WORSE: a debug
+      # step showed `gcloud auth list` then reporting an active account, but
+      # `gcloud auth print-access-token` immediately afterwards failing
+      # outright (no token, step exit 1) — the manual login produced a
+      # broken/unusable account entry rather than a working one. Removed in
+      # favor of the two Google-maintained actions actually designed to work
+      # together: setup-gcloud@v2 does the CLI registration auth@v2
+      # intentionally leaves out, the officially documented pairing for
+      # "authenticate via WIF, then use the gcloud CLI/gcloud-auth'd docker"
+      # in the same job (see google-github-actions/auth's own README,
+      # "Authenticating via Workload Identity Federation" + "Setting up
+      # gcloud").
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       # skip_build 只在 workflow_dispatch 觸發時才可能是 true(tag push
       # 觸發沒有這個 input,github.event.inputs.skip_build 會是空字串,
@@ -77,32 +77,6 @@ jobs:
       - name: Configure Docker for Artifact Registry
         if: github.event.inputs.skip_build != 'true'
         run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
-
-      # TEMPORARY debug step: Push image keeps failing with "Unauthenticated
-      # request" against Artifact Registry despite every prior fix (explicit
-      # gcloud auth login, --quiet to avoid the interactive overwrite
-      # prompt). Print exactly what identity/token gcloud now resolves, try
-      # the Artifact Registry API directly with that token, and dump the
-      # docker credential helper config this step just wrote — to isolate
-      # whether this is a token problem or specifically a docker-push-path
-      # problem. Remove once root-caused.
-      - name: Debug - verify identity and direct API access
-        run: |
-          echo "--- gcloud auth list ---"
-          gcloud auth list
-          echo "--- active account access token (first 20 chars) ---"
-          TOKEN=$(gcloud auth print-access-token 2>&1)
-          echo "${TOKEN}" | head -c 20
-          echo ""
-          echo "--- token length ---"
-          echo "${#TOKEN}"
-          echo "--- direct Artifact Registry API call with this token ---"
-          curl -s -X GET \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "https://artifactregistry.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLOUD_RUN_REGION}/repositories/cloud-run-source-deploy"
-          echo ""
-          echo "--- cat the docker config credential helper section ---"
-          cat ~/.docker/config.json 2>&1 || echo "(no docker config)"
 
       - name: Build Docker image
         if: github.event.inputs.skip_build != 'true'
