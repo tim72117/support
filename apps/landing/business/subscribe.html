@@ -78,7 +78,7 @@
         <label class="field">聯絡 Email<input type="email" name="email" autocomplete="email" /></label>
         <label class="field"><span id="pwLabel">設定密碼（至少 8 個字元）</span><input type="password" name="password" autocomplete="new-password" /></label>
         <p id="error" class="note msg-error" role="alert" hidden></p>
-        <button class="btn" type="submit" id="submitBtn" style="width:100%">繼續到付款</button>
+        <button class="btn" type="submit" id="submitBtn" style="width:100%">繼續</button>
       </form>
     </section>
   </main>
@@ -116,8 +116,13 @@
 
     function planCard(key) { return document.querySelector('.plan[data-plan="' + key + '"]') }
 
-    function goToPay(planKey) {
-      location.href = './pay.html?plan=' + encodeURIComponent(planKey) +
+    // 方案按鈕先導向預約／諮詢頁（reserve.html），而不是直接進付款頁：
+    // 多數訪客此時還在評估，先留資料讓我們事後聯絡，比強迫馬上刷卡更合理。
+    // reserve.html 完成後的確認畫面上仍保留「我想直接完成付款」的連結
+    // （帶著同樣的 plan 參數）直通 pay.html，原本已驗證過的付款流程不會
+    // 變成死路。
+    function goToReserve(planKey) {
+      location.href = './reserve.html?plan=' + encodeURIComponent(planKey) +
         (params.get('api') ? '&api=' + encodeURIComponent(params.get('api')) : '') +
         (params.get('console') ? '&console=' + encodeURIComponent(params.get('console')) : '')
     }
@@ -141,8 +146,8 @@
       btn.addEventListener('click', async () => {
         const planKey = btn.dataset.plan
         if (state.email) {
-          // 已登入，直接跳到付款頁
-          goToPay(planKey)
+          // 已登入，直接跳到預約諮詢頁
+          goToReserve(planKey)
           return
         }
         showStep2(planKey)
@@ -173,11 +178,11 @@
       try {
         await api(mode() === 'register' ? '/auth/register' : '/auth/login', { body: { email, password } })
         state.email = email
-        goToPay(state.plan)
+        goToReserve(state.plan)
       } catch (e2) {
         showError(e2.message || '發生錯誤，請稍後再試。')
       } finally {
-        state.busy = false; $('submitBtn').disabled = false; $('submitBtn').textContent = '繼續到付款'
+        state.busy = false; $('submitBtn').disabled = false; $('submitBtn').textContent = '繼續'
       }
     })
 
@@ -186,7 +191,7 @@
         const me = await api('/auth/me')
         state.email = me.Email || me.email || null
       } catch { /* 未登入 */ }
-      if (state.email) showBanner('已登入：' + state.email + '，選擇方案後將直接前往付款頁。')
+      if (state.email) showBanner('已登入：' + state.email + '，選擇方案後將直接前往預約諮詢頁。')
     }
 
     init()
