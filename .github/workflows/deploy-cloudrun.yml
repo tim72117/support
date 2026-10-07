@@ -53,33 +53,30 @@ jobs:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
+      # auth@v2 with create_credentials_file:true (the default) only writes
+      # the external_account credential file and exports
+      # GOOGLE_APPLICATION_CREDENTIALS — it does NOT register that identity
+      # with the gcloud CLI itself (`gcloud auth list` stays empty, as a
+      # debug step confirmed: "No credentialed accounts", and both
+      # `gcloud auth print-access-token` and the ADC equivalent errored).
+      # `gcloud auth configure-docker` and `docker push` both go through
+      # gcloud's own active-account resolution, not bare ADC, so without
+      # this explicit login they silently fall through to an unauthenticated
+      # request — which is why Push image failed with "Unauthenticated
+      # request" on every attempt despite the Authenticate step itself
+      # reporting success. setup-gcloud@v2 would also fix this (it runs
+      # this same login internally), but a one-line `gcloud auth login` is
+      # less to add to the dependency surface for what's otherwise a
+      # hand-rolled gcloud-only workflow.
+      - name: Register WIF identity with gcloud CLI
+        run: gcloud auth login --brief --cred-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+
       # skip_build 只在 workflow_dispatch 觸發時才可能是 true(tag push
       # 觸發沒有這個 input,github.event.inputs.skip_build 會是空字串,
       # != 'true' 成立,以下步驟正常執行)。
       - name: Configure Docker for Artifact Registry
         if: github.event.inputs.skip_build != 'true'
         run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
-
-      # TEMPORARY debug step: Push image has been failing with
-      # "Unauthenticated request" against Artifact Registry despite the
-      # Authenticate step reporting success. Print what identity gcloud
-      # actually resolved so we can tell whether the WIF token exchange
-      # itself is failing (no active account / wrong principal) versus an
-      # IAM permission problem on a correctly-resolved identity. Remove once
-      # the root cause is found and fixed.
-      - name: Debug - show resolved identity
-        if: github.event.inputs.skip_build != 'true'
-        run: |
-          echo "--- gcloud auth list ---"
-          gcloud auth list
-          echo "--- gcloud config list ---"
-          gcloud config list
-          echo "--- attempting to print an access token (first 20 chars only) ---"
-          gcloud auth print-access-token 2>&1 | head -c 20
-          echo ""
-          echo "--- ADC check ---"
-          gcloud auth application-default print-access-token 2>&1 | head -c 20 || true
-          echo ""
 
       - name: Build Docker image
         if: github.event.inputs.skip_build != 'true'
