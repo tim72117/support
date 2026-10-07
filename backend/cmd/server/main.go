@@ -186,6 +186,19 @@ func main() {
 		log.Warn("TAPPAY_PARTNER_KEY / TAPPAY_MERCHANT_ID not set; billing is disabled")
 	case quotaSvc == nil:
 		log.Warn("QUOTA_ENABLED=false; billing is disabled (it needs the quota service)")
+	case gormDB == nil:
+		// TEMPORARY, same reason as the db.Open error becoming non-fatal
+		// above: billingSvc.Run's background loop (billing.go RenewDue)
+		// calls gormDB.WithContext(...) unconditionally on every tick, and
+		// gorm.(*DB).WithContext on a nil receiver panics (not a graceful
+		// error) — that crashed the whole process shortly after startup the
+		// first time this was tried, taking the entire server down with it
+		// (confirmed via Cloud Run's revision logs: "invalid memory address
+		// or nil pointer dereference" in billing.(*Service).RenewDue).
+		// Skipping starting the goroutine at all here avoids that. Revert
+		// alongside the db.Open fatal-exit revert once DATABASE_URL points
+		// at a real reachable database.
+		log.Warn("database not connected; billing's background renewal loop is not started (TEMPORARY, see comment)")
 	default:
 		billingSvc = billing.New(gormDB, tappay.New(tpCfg), quotaSvc, log)
 		go billingSvc.Run(context.Background(), time.Hour)
