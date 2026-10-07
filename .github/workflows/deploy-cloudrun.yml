@@ -129,6 +129,14 @@ jobs:
           # 時不跑任何實例、不計費，代價是冷啟動延遲）；max=1 把並發實例
           # 數鎖死在 1，避免流量暴衝（或被濫用攻擊）時無限擴展、產生意外
           # 高額帳單——流量真的成長到需要更高上限時，再手動調整。
+          # --add-cloudsql-instances: DATABASE_URL (see Secret Manager)
+          # connects via the Cloud SQL Unix socket at
+          # /cloudsql/onagent-prod:asia-east1:onagent-db — a *different*
+          # GCP project's Cloud SQL instance (shared with onagent/shuttle,
+          # this deployment just owns the "wenbi" database + "wenbi_app"
+          # user on it). Cross-project, so the runtime service account
+          # (<PROJECT_NUMBER>-compute@developer.gserviceaccount.com) needed
+          # roles/cloudsql.client granted on onagent-prod, not just here.
           gcloud run deploy ${{ env.CLOUD_RUN_SERVICE }} \
             --project=${{ env.GCP_PROJECT_ID }} \
             --image=${{ env.IMAGE }}:${{ github.event.inputs.skip_build == 'true' && 'latest' || github.sha }} \
@@ -136,6 +144,7 @@ jobs:
             --allow-unauthenticated \
             --min-instances=0 \
             --max-instances=1 \
+            --add-cloudsql-instances=onagent-prod:asia-east1:onagent-db \
             --update-env-vars="${ENV_VARS}" \
             --update-secrets="${SECRETS}" \
             --quiet

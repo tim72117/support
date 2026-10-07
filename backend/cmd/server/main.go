@@ -105,18 +105,8 @@ func main() {
 	dsn := envOr("DATABASE_URL", "postgres://platform:platform@localhost:5434/platform?sslmode=disable")
 	gormDB, err := db.Open(dsn)
 	if err != nil {
-		// TEMPORARY: this used to be a fatal os.Exit(1) — a database is a
-		// hard dependency of nearly everything below (session, business,
-		// quota, billing, admin all need it). Downgraded to a warning only
-		// to let the very first Cloud Run deploy succeed and get a domain
-		// mapping set up before a real cloud Postgres exists; every request
-		// that touches the database will fail once gormDB is nil (gorm
-		// returns an error from a nil *gorm.DB rather than panicking, so
-		// this doesn't crash the process — it just makes every DB-backed
-		// route respond with an error). Revert this to the fatal exit once
-		// DATABASE_URL points at a real reachable database — a server that
-		// silently can't store anything is not a valid steady state.
-		log.Error("failed to open database; continuing to start anyway (TEMPORARY, see comment) — every database-backed route will fail", "err", err)
+		log.Error("failed to open database", "err", err)
+		os.Exit(1)
 	}
 
 	cookieSecure := os.Getenv("COOKIE_SECURE") == "true"
@@ -186,19 +176,6 @@ func main() {
 		log.Warn("TAPPAY_PARTNER_KEY / TAPPAY_MERCHANT_ID not set; billing is disabled")
 	case quotaSvc == nil:
 		log.Warn("QUOTA_ENABLED=false; billing is disabled (it needs the quota service)")
-	case gormDB == nil:
-		// TEMPORARY, same reason as the db.Open error becoming non-fatal
-		// above: billingSvc.Run's background loop (billing.go RenewDue)
-		// calls gormDB.WithContext(...) unconditionally on every tick, and
-		// gorm.(*DB).WithContext on a nil receiver panics (not a graceful
-		// error) — that crashed the whole process shortly after startup the
-		// first time this was tried, taking the entire server down with it
-		// (confirmed via Cloud Run's revision logs: "invalid memory address
-		// or nil pointer dereference" in billing.(*Service).RenewDue).
-		// Skipping starting the goroutine at all here avoids that. Revert
-		// alongside the db.Open fatal-exit revert once DATABASE_URL points
-		// at a real reachable database.
-		log.Warn("database not connected; billing's background renewal loop is not started (TEMPORARY, see comment)")
 	default:
 		billingSvc = billing.New(gormDB, tappay.New(tpCfg), quotaSvc, log)
 		go billingSvc.Run(context.Background(), time.Hour)
