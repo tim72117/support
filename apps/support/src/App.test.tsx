@@ -266,15 +266,23 @@ describe('consumer chat page', () => {
     expect(listTool).toBeTruthy()
     expect(readTool).toBeTruthy()
 
-    await expect(listTool.handle({})).resolves.toEqual({ sections: [{ id: 'hours', title: '營業時間' }] })
-    await expect(readTool.handle({ sectionId: 'hours' })).resolves.toEqual({
+    // Every call must carry businessSlug (the tool definitions in
+    // backend/onagent-tools/*.yaml require it — see useChat.ts's
+    // requireOwnSlug), because every business's page now shares the same
+    // onagent app instead of each having its own.
+    await expect(listTool.handle({ businessSlug: 'shop' })).resolves.toEqual({
+      sections: [{ id: 'hours', title: '營業時間' }],
+    })
+    await expect(readTool.handle({ businessSlug: 'shop', sectionId: 'hours' })).resolves.toEqual({
       id: 'hours',
       title: '營業時間',
       body: '9-18 點',
     })
     expect(calls('GET', '/sections')).toHaveLength(1)
     expect(calls('GET', '/sections/hours')).toHaveLength(1)
-    expect(() => readTool.handle({})).toThrow()
+    expect(() => readTool.handle({ businessSlug: 'shop' })).toThrow()
+    expect(() => listTool.handle({})).toThrow()
+    expect(() => readTool.handle({ businessSlug: 'some-other-shop', sectionId: 'hours' })).toThrow()
   })
 
   it('closes the onagent connection when the page unmounts', async () => {

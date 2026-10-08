@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/tim72117/ai-support/internal/console"
 	"github.com/tim72117/ai-support/internal/conversation"
 	"github.com/tim72117/ai-support/internal/db"
-	"github.com/tim72117/ai-support/internal/onagentclient"
 	"github.com/tim72117/ai-support/internal/public"
 	"github.com/tim72117/ai-support/internal/quota"
 	"github.com/tim72117/ai-support/internal/reservation"
@@ -27,6 +25,12 @@ import (
 )
 
 // Needs a real Postgres: TEST_DATABASE_URL=postgres://... go test -tags integration ./internal/public
+//
+// This no longer provisions anything on onagent: every business shares one
+// fixed onagent app/key (ONAGENT_APP_ID/ONAGENT_APP_KEY in a real
+// deployment, provisioned by hand with the onagent CLI), so there is no
+// console-side app/key/thought push to fake or verify here anymore — the
+// fixed app id/key below stand in for whatever a real deployment configures.
 func TestPublicChatEndToEnd(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -39,34 +43,7 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	// fake onagent: records every call and answers like the real console API.
-	var mu sync.Mutex
-	var calls []string
-	var thought string
-	onagent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		calls = append(calls, r.Method+" "+r.URL.Path)
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			http.Error(w, "unauthorized", 401)
-			return
-		}
-		switch {
-		case r.Method == "POST" && r.URL.Path == "/console/apps":
-			w.WriteHeader(201)
-			w.Write([]byte(`{}`))
-		case strings.HasSuffix(r.URL.Path, "/key"):
-			w.Write([]byte(`{"appId":"x","apiKey":"browser-key-` + fmt.Sprint(suffix) + `"}`))
-		case strings.HasSuffix(r.URL.Path, "/thought"):
-			var b struct{ Thought string }
-			json.NewDecoder(r.Body).Decode(&b)
-			thought = b.Thought
-			w.Write([]byte(`{}`))
-		default:
-			w.Write([]byte(`{}`))
-		}
-	}))
-	defer onagent.Close()
+	const sharedAppID, sharedAppKey = "shared-app", "shared-key"
 
 	sessions := session.New(gdb, false)
 	owner, err := sessions.Register(fmt.Sprintf("pub-%d@example.com", suffix), "password123")
@@ -84,10 +61,8 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	biz := business.New(gdb)
 	quotaSvc := quota.New(gdb)
 	chats := conversation.New(gdb)
-	client := onagentclient.New(onagentclient.Config{BaseURL: onagent.URL, Token: "test-token", AllowedOrigins: []string{"http://localhost:5178"}})
 
 	ch := console.NewHandler(biz, sessions, quotaSvc, log)
-	ch.Onagent = client
 	ch.Chats = chats
 	consoleMux := http.NewServeMux()
 	ch.Register(consoleMux)
@@ -113,48 +88,29 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
-	var created struct {
-		ID          int64
-		OnagentSync string
-	}
+	var created struct{ ID int64 }
 	json.Unmarshal(rec.Body.Bytes(), &created)
-	if created.OnagentSync != "ok" {
-		t.Fatalf("onagentSync = %q", created.OnagentSync)
-	}
-	if strings.Contains(rec.Body.String(), "browser-key") {
-		t.Fatal("console response must not expose the onagent api key")
-	}
 	t.Cleanup(func() { gdb.Exec("DELETE FROM businesses WHERE id = ?", created.ID) })
 
-	// 2. saving content pushes a short briefing (not the content itself) as
-	// the thought; the actual content text is only reachable through the
+	// 2. saving content: no onagent push happens anywhere anymore (every
+	// business shares one fixed app — there is nothing per-business to
+	// provision or sync). The content is only reachable through the
 	// sections tool-backing API below.
 	sectionsBody := `[{"id":"hours","title":"營業時間","body":"週一公休，其餘 9-18 點。"},{"id":"other","title":"其他","body":""}]`
 	rec = consoleDo(owner.ID, "PUT", fmt.Sprintf("/console/businesses/%d/content", created.ID),
 		fmt.Sprintf(`{"Content":"週一公休，其餘 9-18 點。","Sections":%s}`, sectionsBody))
-	if rec.Code != 204 || rec.Header().Get("X-Onagent-Sync") != "ok" {
+	if rec.Code != 204 {
 		t.Fatalf("put content: %d %s", rec.Code, rec.Body.String())
 	}
-	mu.Lock()
-	if !strings.Contains(thought, "整合測試店") || !strings.Contains(thought, "list_sections") || !strings.Contains(thought, "read_section") {
-		t.Fatalf("thought = %q", thought)
-	}
-	if strings.Contains(thought, "週一公休") {
-		t.Fatalf("thought must not embed section content: %q", thought)
-	}
-	creates := 0
-	for _, c := range calls {
-		if c == "POST /console/apps" {
-			creates++
-		}
-	}
-	mu.Unlock()
-	if creates != 1 {
-		t.Fatalf("app created %d times, want exactly 1 (content save must not re-provision)", creates)
-	}
 
-	// 3. public API.
-	pub := public.NewHandler(public.Config{Businesses: biz, Chats: chats, Quota: quotaSvc, OnagentWSURL: client.WSURL(), Log: log})
+	// 3. public API. OnagentAppID/OnagentAppKey/OnagentWSURL stand in for
+	// what a real deployment reads from ONAGENT_APP_ID/ONAGENT_APP_KEY/
+	// ONAGENT_WS_URL — the same fixed values for every business.
+	pub := public.NewHandler(public.Config{
+		Businesses: biz, Chats: chats, Quota: quotaSvc,
+		OnagentWSURL: "ws://onagent.test/ws", OnagentAppID: sharedAppID, OnagentAppKey: sharedAppKey,
+		Log: log,
+	})
 	pubMux := http.NewServeMux()
 	pub.Register(pubMux)
 	pubDo := func(method, path, body string) *httptest.ResponseRecorder {
@@ -166,7 +122,7 @@ func TestPublicChatEndToEnd(t *testing.T) {
 	}
 
 	rec = pubDo("GET", "/public/businesses/"+slug, "")
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "browser-key-") || !strings.Contains(rec.Body.String(), `"wsUrl":"ws://`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), sharedAppKey) || !strings.Contains(rec.Body.String(), `"wsUrl":"ws://`) {
 		t.Fatalf("get business: %d %s", rec.Code, rec.Body.String())
 	}
 
@@ -353,81 +309,9 @@ func TestPublicReservations(t *testing.T) {
 	}
 }
 
-// With onagent unconfigured or failing, the business is still created and the
-// failure is reported (not a 500), and a retry succeeds once onagent is back.
-func TestCreateBusinessSurvivesOnagentFailure(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
-	gdb, err := db.Open(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	suffix := time.Now().UnixNano()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sessions := session.New(gdb, false)
-	owner, err := sessions.Register(fmt.Sprintf("pubf-%d@example.com", suffix), "password123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { gdb.Exec("DELETE FROM users WHERE id = ?", owner.ID) })
-
-	var healthy bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !healthy {
-			http.Error(w, "boom", 500)
-			return
-		}
-		if strings.HasSuffix(r.URL.Path, "/key") {
-			w.Write([]byte(`{"apiKey":"k"}`))
-			return
-		}
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	ch := console.NewHandler(business.New(gdb), sessions, nil, log)
-	ch.Onagent = onagentclient.New(onagentclient.Config{BaseURL: srv.URL, Token: "t"})
-	mux := http.NewServeMux()
-	ch.Register(mux)
-	rec := httptest.NewRecorder()
-	cookieRec := httptest.NewRecorder()
-	sessions.CreateSession(cookieRec, owner.ID)
-	do := func(method, path, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req.AddCookie(cookieRec.Result().Cookies()[0])
-		rec = httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		return rec
-	}
-
-	rec = do("POST", "/console/businesses", fmt.Sprintf(`{"slug":"itf-%d","name":"X"}`, suffix))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"onagentSync":"failed"`) {
-		t.Fatalf("create with failing onagent: %d %s", rec.Code, rec.Body.String())
-	}
-	var created struct{ ID int64 }
-	json.Unmarshal(rec.Body.Bytes(), &created)
-	t.Cleanup(func() { gdb.Exec("DELETE FROM businesses WHERE id = ?", created.ID) })
-
-	if rec = do("POST", fmt.Sprintf("/console/businesses/%d/onagent-sync", created.ID), ""); rec.Code != 502 {
-		t.Fatalf("retry while down: %d", rec.Code)
-	}
-	healthy = true
-	if rec = do("POST", fmt.Sprintf("/console/businesses/%d/onagent-sync", created.ID), ""); rec.Code != 200 {
-		t.Fatalf("retry when healthy: %d %s", rec.Code, rec.Body.String())
-	}
-	b, _ := business.New(gdb).Get(created.ID)
-	if b.OnagentAppID == nil || b.OnagentAPIKey == nil || *b.OnagentAPIKey != "k" {
-		t.Fatalf("not provisioned after retry: %+v", b)
-	}
-
-	// disabled client: save works, reports disabled, sync endpoint is 503.
-	ch.Onagent = onagentclient.New(onagentclient.Config{})
-	if rec = do("PUT", fmt.Sprintf("/console/businesses/%d/content", created.ID), `{"Content":"c"}`); rec.Code != 204 || rec.Header().Get("X-Onagent-Sync") != "disabled" {
-		t.Fatalf("content with disabled onagent: %d %s", rec.Code, rec.Body.String())
-	}
-	if rec = do("POST", fmt.Sprintf("/console/businesses/%d/onagent-sync", created.ID), ""); rec.Code != 503 {
-		t.Fatalf("sync disabled: %d", rec.Code)
-	}
-}
+// TestCreateBusinessSurvivesOnagentFailure (the old "retry provisioning"
+// test) no longer applies: there is nothing to provision per business —
+// every business shares the one onagent app configured once via
+// ONAGENT_APP_ID/ONAGENT_APP_KEY — so createBusiness has no onagent call
+// left that could fail, and the POST .../onagent-sync retry route is gone
+// too. See TestPublicChatEndToEnd above for the current create/save flow.

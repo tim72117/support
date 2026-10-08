@@ -26,7 +26,15 @@ export const LAYOUT_LABELS: Record<LayoutId, string> = {
   split: '左右對話',
 }
 
-/** One business (a consumer-facing support page) as the backend stores it. */
+/**
+ * One business (a consumer-facing support page) as the backend stores it.
+ *
+ * There is no longer a per-business "connected to the AI service" status:
+ * every business's consumer page shares the same, fixed onagent app
+ * (configured once on the backend), so a business's page can always chat as
+ * soon as content is filled in — there is nothing left to provision or sync
+ * per business.
+ */
 export interface Business {
   id: number
   name: string
@@ -38,8 +46,6 @@ export interface Business {
   mascot: MascotId
   /** Which page layout the consumer-facing chat page uses. */
   layout: LayoutId
-  /** True once the business has an onagent app, i.e. its page can chat. */
-  connected: boolean
 }
 
 /** The look settings an owner can change after creation (slug is not one of them). */

@@ -34,18 +34,24 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions (user_id);
 
--- 一個業主帳號（user）底下可以有多個 business（服務）——多租戶的核心：
--- 每個 business 對應 onagent 那邊的一個 app，靠 onagent_app_id/
--- onagent_api_key 呼叫 onagent 的 console API 推送 tool 定義,
--- 消費者頁面則直接用 onagent_api_key 讓瀏覽器端的 @onagent/bridge
--- SDK 開 WebSocket，不經過這個後端轉發。
+-- 一個業主帳號（user）底下可以有多個 business（服務）——多租戶的核心。
+--
+-- onagent_app_id / onagent_api_key 是歷史遺留欄位：原本每個 business 對應
+-- onagent 那邊各自的一個 app，由後端呼叫 onagent 的 console API 建立、發
+-- key。現在所有 business 共用同一個固定的 onagent app（後端從
+-- ONAGENT_APP_ID / ONAGENT_APP_KEY 環境變數讀取，見
+-- backend/cmd/server/main.go），後端不再寫入或讀取這兩欄；AI 用
+-- list_sections/read_section 工具的 businessSlug 參數分辨目前在跟哪個
+-- business 對話（見 backend/onagent-tools/*.yaml），不再靠各自的 app 識別。
+-- 欄位留在表裡（當死欄位），沒有特別做 migration 刪除——詳見移除這套機制
+-- 當次改動的交接報告。
 CREATE TABLE IF NOT EXISTS businesses (
     id               BIGSERIAL PRIMARY KEY,
     owner_id         BIGINT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     slug             TEXT NOT NULL, -- 消費者服務頁面網址用，例如 /support/<slug>
     name             TEXT NOT NULL,
-    onagent_app_id   TEXT,          -- 對應 onagent 那邊建立的 app id，尚未建立前為 NULL
-    onagent_api_key  TEXT,          -- onagent 該 app 的 API key（消費者頁面 SDK 連線用）
+    onagent_app_id   TEXT,          -- 死欄位，不再寫入/讀取，見上方說明
+    onagent_api_key  TEXT,          -- 死欄位，不再寫入/讀取，見上方說明
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -53,10 +59,11 @@ CREATE INDEX IF NOT EXISTS businesses_owner_id_idx ON businesses (owner_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS businesses_slug_idx ON businesses (slug);
 
--- 業主在自己的 console 設定「AI 可以提供的內容」，存起來後由後端呼叫
--- onagent 的 console API 轉成該 business 對應 onagent app 的 tool 定義。
--- 內容結構先保持最單純（單一文字欄位），實際的結構化（例如拆成多筆
--- FAQ）留給之後的產品需求決定，不在空骨架範圍內先假設。
+-- 業主在自己的 console 設定「AI 可以提供的內容」。後端不再把這份內容推送
+-- 到 onagent（不再呼叫 onagent 的 console API）；消費端對話頁的 AI 透過
+-- list_sections/read_section 工具在對話過程中反查這裡存的內容（見
+-- backend/internal/public 的 /sections 端點）。內容結構先保持最單純（單一
+-- 文字欄位），實際的結構化（例如拆成多筆 FAQ）留給之後的產品需求決定。
 CREATE TABLE IF NOT EXISTS business_content (
     business_id BIGINT PRIMARY KEY REFERENCES businesses (id) ON DELETE CASCADE,
     content     TEXT NOT NULL DEFAULT '',

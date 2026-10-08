@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import styles from './BusinessEditor.module.css'
-import { useBackend, type SyncStatus } from './BackendContext.tsx'
+import { useBackend } from './BackendContext.tsx'
 import { ConversationsTab } from './ConversationsTab.tsx'
 import { Mascot } from './Mascot.tsx'
 import {
@@ -43,7 +43,7 @@ function lookOf(b: Business): LookDraft {
 }
 
 export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
-  const { businesses, updateBusiness, deleteBusiness, loadContent, saveContent, syncOnagent } = useBackend()
+  const { businesses, updateBusiness, deleteBusiness, loadContent, saveContent } = useBackend()
   const business = businesses.find((b) => b.id === businessId)
 
   // Hooks below must not sit after a conditional return, or the "no
@@ -59,8 +59,6 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const [sync, setSync] = useState<SyncStatus | null>(null)
-  const [syncing, setSyncing] = useState(false)
   const [copied, setCopied] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -116,28 +114,20 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
     if (!canSave) return
     setSaving(true)
     setSaveError('')
-    setSync(null)
     try {
       if (lookDirty) {
         const updated = await updateBusiness(businessId, patch)
         setLook(lookOf(updated))
       }
       if (contentDirty) {
-        const status = await saveContent(businessId, sections)
+        await saveContent(businessId, sections)
         setSavedSections(sections)
-        setSync(status)
       }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : '儲存失敗，請稍後再試。')
     } finally {
       setSaving(false)
     }
-  }
-
-  async function handleResync() {
-    setSyncing(true)
-    setSync(await syncOnagent(businessId))
-    setSyncing(false)
   }
 
   async function handleDelete() {
@@ -158,8 +148,6 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
-
-  const showResync = sync === 'failed' || (!business.connected && sync !== 'disabled')
 
   return (
     <div>
@@ -237,25 +225,6 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
             onConfirm={() => void handleDelete()}
           />
         </>
-      )}
-
-      {sync && sync !== 'unknown' && (
-        <div
-          className={`${styles.notice} ${sync === 'ok' ? styles.noticeOk : sync === 'failed' ? styles.noticeWarn : ''}`}
-          role="status"
-        >
-          {sync === 'ok' && '已儲存，AI 小幫手已經用到最新內容。'}
-          {sync === 'failed' && '內容已儲存，但同步給 AI 小幫手失敗了。可以稍後重新同步。'}
-          {sync === 'disabled' && '內容已儲存。AI 對話服務目前還沒啟用，啟用後就會自動套用。'}
-        </div>
-      )}
-      {showResync && contentLoad === 'ready' && (
-        <div className={styles.notice}>
-          {business.connected ? '' : 'AI 小幫手還沒有啟用。'}
-          <button type="button" className={styles.smallButton} onClick={() => void handleResync()} disabled={syncing}>
-            {syncing ? '同步中…' : '重新同步'}
-          </button>
-        </div>
       )}
 
       <div className={styles.footerBar}>

@@ -1,10 +1,14 @@
 // Command server runs the ai-support backend: business-owner accounts, the
 // console API for managing businesses and their content, and the anonymous
 // /public/* API behind each consumer chat page. It never talks to an LLM
-// itself: the chat page forwards messages to onagent from the browser with
-// @onagent/bridge, but only after this backend has recorded and quota-checked
-// them; this backend's own calls to onagent (internal/onagentclient) just
-// provision each business's onagent app and push its content.
+// itself, and it never calls onagent's console API: the chat page forwards
+// messages to onagent from the browser with @onagent/bridge, but only after
+// this backend has recorded and quota-checked them. Every business's
+// consumer page shares the one onagent app configured by ONAGENT_APP_ID/
+// ONAGENT_APP_KEY below (provisioned once, by hand, with the onagent CLI —
+// this backend has no write access to onagent's console API at all); the AI
+// tells businesses apart itself via the businessSlug parameter on the
+// list_sections/read_section tools (see backend/onagent-tools/*.yaml).
 package main
 
 import (
@@ -12,6 +16,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -26,7 +31,6 @@ import (
 	"github.com/tim72117/ai-support/internal/conversation"
 	"github.com/tim72117/ai-support/internal/db"
 	"github.com/tim72117/ai-support/internal/googleauth"
-	"github.com/tim72117/ai-support/internal/onagentclient"
 	"github.com/tim72117/ai-support/internal/public"
 	"github.com/tim72117/ai-support/internal/quota"
 	"github.com/tim72117/ai-support/internal/reservation"
@@ -67,20 +71,30 @@ Configured entirely via environment variables (optionally loaded from a
   PUBLIC_ALLOWED_ORIGIN      Comma-separated origins of the consumer chat page
                               (apps/support) allowed to call the anonymous
                               /public/* API (no credentials, never "*"). Also
-                              registered on each onagent app as the origins its
-                              browser-side API key may be used from.
+                              the origins that must be registered as the
+                              shared onagent app's allowed origins (with the
+                              onagent CLI's "app origin set", run by hand —
+                              this backend does not call onagent's console
+                              API at all).
   PUBLIC_TRUST_PROXY         "true" when behind a reverse proxy: take the client
                               IP for rate limiting from X-Forwarded-For.
-  ONAGENT_BASE_URL           onagent HTTP origin, e.g. "https://onagent.example.com".
-  ONAGENT_TOKEN              Bearer token of this deployment's onagent business
-                              account (a usertoken, like "onagent login" stores).
-                              Never log or send to a client. Without both, the
-                              onagent integration is off: businesses are saved
-                              but not provisioned, and chat reports unavailable.
+  ONAGENT_BASE_URL           onagent's HTTP origin, e.g.
+                              "https://onagent.example.com". Used to derive the
+                              default WebSocket URL handed to browsers (see
+                              ONAGENT_WS_URL). This backend makes no HTTP calls
+                              to onagent itself.
   ONAGENT_WS_URL             Optional: WebSocket URL handed to browsers
                               (default: ONAGENT_BASE_URL with ws(s):// and /ws).
-  ONAGENT_APP_ID_PREFIX      Optional prefix for generated onagent app ids
-                              (default "aisupport-").
+  ONAGENT_APP_ID             The onagent app every business's consumer page
+  ONAGENT_APP_KEY             shares, and its browser-side API key. Both are
+                              provisioned once, by hand, with the onagent CLI
+                              (see backend/onagent-tools/*.yaml for the tool
+                              definitions pushed to that one app) — this
+                              backend never creates an app or issues a key.
+                              The browser tells the AI which business it is
+                              talking to via the list_sections/read_section
+                              tools' businessSlug parameter, not via the app.
+                              Unset means chat reports unavailable.
   ADMIN_EMAILS               Comma-separated emails allowed to use the
                               platform-admin back office (/admin/api/*,
                               apps/admin). Not a separate account system: an
@@ -128,36 +142,35 @@ func main() {
 
 	publicOrigins := splitOrigins(os.Getenv("PUBLIC_ALLOWED_ORIGIN"))
 	if len(publicOrigins) == 0 {
-		log.Warn("no PUBLIC_ALLOWED_ORIGIN set; browsers on other origins cannot call /public/*, and onagent apps get no allowed origin (dev mode only)")
+		log.Warn("no PUBLIC_ALLOWED_ORIGIN set; browsers on other origins cannot call /public/* (dev mode only — the shared onagent app's allowed origins are set separately, by hand, with the onagent CLI)")
 	}
 
-	// onagent integration: off (log one line, keep starting) unless both the
-	// base URL and the business-account token are set.
-	onagent := onagentclient.New(onagentclient.Config{
-		BaseURL:        os.Getenv("ONAGENT_BASE_URL"),
-		Token:          os.Getenv("ONAGENT_TOKEN"),
-		AppIDPrefix:    os.Getenv("ONAGENT_APP_ID_PREFIX"),
-		AllowedOrigins: publicOrigins,
-	})
+	// onagent integration: this backend never calls onagent's console API —
+	// every business's consumer page shares the one onagent app set up by
+	// hand with the onagent CLI. Chat is off (log one line, keep starting)
+	// unless the app id, its key, and a WS URL are all available.
+	onagentAppID := os.Getenv("ONAGENT_APP_ID")
+	onagentAppKey := os.Getenv("ONAGENT_APP_KEY")
 	onagentWSURL := os.Getenv("ONAGENT_WS_URL")
-	if onagent.Enabled() {
-		consoleHandler.Onagent = onagent
-		if onagentWSURL == "" {
-			onagentWSURL = onagent.WSURL()
-		}
-		log.Info("onagent integration enabled", "ws", onagentWSURL)
+	if onagentWSURL == "" {
+		onagentWSURL = deriveWSURL(os.Getenv("ONAGENT_BASE_URL"))
+	}
+	if onagentAppID != "" && onagentAppKey != "" && onagentWSURL != "" {
+		log.Info("onagent integration enabled", "ws", onagentWSURL, "appId", onagentAppID)
 	} else {
-		log.Warn("ONAGENT_BASE_URL / ONAGENT_TOKEN not set; onagent integration is disabled (businesses are saved but not provisioned; public chat reports unavailable)")
-		onagentWSURL = ""
+		log.Warn("ONAGENT_APP_ID / ONAGENT_APP_KEY / ONAGENT_WS_URL (or ONAGENT_BASE_URL) not all set; onagent integration is disabled (public chat reports unavailable)")
+		onagentAppID, onagentAppKey, onagentWSURL = "", "", ""
 	}
 	publicHandler := public.NewHandler(public.Config{
-		Businesses:   businessStore,
-		Chats:        chatStore,
-		Quota:        quotaSvc,
-		Reservations: reservation.New(gormDB),
-		OnagentWSURL: onagentWSURL,
-		TrustProxy:   os.Getenv("PUBLIC_TRUST_PROXY") == "true",
-		Log:          log,
+		Businesses:    businessStore,
+		Chats:         chatStore,
+		Quota:         quotaSvc,
+		Reservations:  reservation.New(gormDB),
+		OnagentWSURL:  onagentWSURL,
+		OnagentAppID:  onagentAppID,
+		OnagentAppKey: onagentAppKey,
+		TrustProxy:    os.Getenv("PUBLIC_TRUST_PROXY") == "true",
+		Log:           log,
 	})
 
 	// TapPay billing. Needs the quota service (it moves owners between
@@ -337,7 +350,6 @@ func corsMiddleware(allowed func(string) bool) func(http.Handler) http.Handler {
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Expose-Headers", "X-Onagent-Sync")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -359,4 +371,27 @@ func allowlistChecker(allowed []string) func(string) bool {
 
 func envOr(key, fallback string) string {
 	return cmp.Or(os.Getenv(key), fallback)
+}
+
+// deriveWSURL turns onagent's HTTP origin into its WebSocket endpoint
+// (onagent serves it at /ws — see its own cmd/server/main.go), e.g.
+// "https://onagent.example.com" -> "wss://onagent.example.com/ws". Empty in,
+// empty out. ONAGENT_WS_URL overrides this when set, for a deployment where
+// the two differ (e.g. a WS-specific load balancer).
+func deriveWSURL(baseURL string) string {
+	if baseURL == "" {
+		return ""
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	switch u.Scheme {
+	case "https":
+		u.Scheme = "wss"
+	default:
+		u.Scheme = "ws"
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/ws"
+	return u.String()
 }

@@ -14,10 +14,12 @@
 # registers the tool's existence/shape with onagent so its model knows when
 # and how to call it; it does not run any code itself.
 #
-# No parameters: each onagent app here corresponds to exactly one business
-# (see backend/internal/console/console.go's syncOnagent, which provisions
-# one onagent app per business), so there is nothing to disambiguate — the
-# browser's handler already knows which business's slug to call.
+# businessSlug parameter: every business's consumer page now shares the SAME
+# onagent app (ONAGENT_APP_ID/ONAGENT_APP_KEY in backend/cmd/server/main.go)
+# instead of each business having its own app, so the app itself no longer
+# identifies which business a call is about. The model must pass the slug of
+# the business it is currently talking to (the /support/<slug> segment of
+# the page it is embedded in) on every call.
 name: list_sections
 description: >-
   List the titles of the content sections this business owner has filled in
@@ -30,5 +32,14 @@ description: >-
   instead of guessing.
 parameters:
   type: object
-  properties: {}
+  properties:
+    businessSlug:
+      type: string
+      description: >-
+        The slug of the business this conversation is about — the
+        /support/<slug> segment of the current page's URL. Always pass the
+        slug for the business you are currently helping; never guess or
+        reuse a slug from a different conversation.
+  required:
+    - businessSlug
 kind: query

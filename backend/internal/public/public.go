@@ -104,6 +104,16 @@ type Config struct {
 	// OnagentWSURL is what the browser's bridge connects to; empty means
 	// onagent integration is off and chat is reported unavailable.
 	OnagentWSURL string
+	// OnagentAppID / OnagentAppKey are the one onagent app and API key every
+	// business's consumer page shares (see cmd/server/main.go's
+	// ONAGENT_APP_ID/ONAGENT_APP_KEY) — there is no longer a per-business
+	// app/key. The AI tells businesses apart itself: list_sections/
+	// read_section take a businessSlug parameter (see
+	// backend/onagent-tools/*.yaml) instead of the app identifying the
+	// business. Empty means chat is reported unavailable, same as an empty
+	// OnagentWSURL.
+	OnagentAppID  string
+	OnagentAppKey string
 	// TrustProxy: take the client IP from the right-most X-Forwarded-For.
 	TrustProxy bool
 	Log        *slog.Logger
@@ -162,10 +172,14 @@ func (h *Handler) Register(mux *http.ServeMux) {
 type chatInfo struct {
 	Available bool   `json:"available"`
 	WSURL     string `json:"wsUrl,omitempty"`
-	AppID     string `json:"appId,omitempty"`
-	// APIKey is onagent's browser-side key for this business's app: onagent
-	// only accepts it from the app's allowed origins and it can only talk to
-	// this one app. It is intentionally public.
+	// AppID / APIKey are the one onagent app and browser-side key EVERY
+	// business shares (ONAGENT_APP_ID/ONAGENT_APP_KEY) — not specific to this
+	// business. onagent only accepts the key from the app's allowed origins,
+	// and it is intentionally public (it is handed to the browser). Because
+	// the app is shared, the AI distinguishes businesses itself: the
+	// list_sections/read_section tool calls it makes carry this business's
+	// slug (see backend/onagent-tools/*.yaml and apps/support/src/useChat.ts).
+	AppID  string `json:"appId,omitempty"`
 	APIKey string `json:"apiKey,omitempty"`
 }
 
@@ -189,15 +203,17 @@ func (h *Handler) getBusiness(w http.ResponseWriter, r *http.Request) {
 		Slug: b.Slug, Name: b.Name, Tagline: b.Tagline, Mascot: b.Mascot, ThemeColor: b.ThemeColor, Layout: b.Layout,
 		MaxMessageLength: MaxMessageRunes,
 	}
-	if h.chatAvailable(b) {
-		resp.Chat = chatInfo{Available: true, WSURL: h.cfg.OnagentWSURL, AppID: *b.OnagentAppID, APIKey: *b.OnagentAPIKey}
+	if h.chatAvailable() {
+		resp.Chat = chatInfo{Available: true, WSURL: h.cfg.OnagentWSURL, AppID: h.cfg.OnagentAppID, APIKey: h.cfg.OnagentAppKey}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) chatAvailable(b *business.Business) bool {
-	return h.cfg.OnagentWSURL != "" && b.OnagentAppID != nil && *b.OnagentAppID != "" &&
-		b.OnagentAPIKey != nil && *b.OnagentAPIKey != ""
+// chatAvailable reports whether the one shared onagent app is configured.
+// It no longer depends on the business at all — every business uses the
+// same app/key — so the parameter from the old per-business check is gone.
+func (h *Handler) chatAvailable() bool {
+	return h.cfg.OnagentWSURL != "" && h.cfg.OnagentAppID != "" && h.cfg.OnagentAppKey != ""
 }
 
 // --- GET /public/businesses/{slug}/sections[/...] ----------------------------
@@ -295,7 +311,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.chatAvailable(b) {
+	if !h.chatAvailable() {
 		writeError(w, http.StatusServiceUnavailable, CodeUnavailable, "目前無法服務。")
 		return
 	}

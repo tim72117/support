@@ -129,8 +129,6 @@ func (f *fakeQuota) Record(_ context.Context, bid, uid int64, ev string, u *quot
 	return nil
 }
 
-func str(s string) *string { return &s }
-
 type env struct {
 	h     *Handler
 	mux   *http.ServeMux
@@ -138,13 +136,27 @@ type env struct {
 	quota *fakeQuota
 }
 
+// newEnv builds a handler with the one shared onagent app configured (every
+// business uses the same appId/apiKey now — see Config.OnagentAppID/
+// OnagentAppKey). newEnvNoOnagent below is the "integration disabled" case
+// that used to be the "bare" business with no app/key of its own.
 func newEnv(t *testing.T) *env {
+	t.Helper()
+	return newEnvWithChat(t, "wss://onagent.test/ws", "shared-app", "shared-key")
+}
+
+func newEnvNoOnagent(t *testing.T) *env {
+	t.Helper()
+	return newEnvWithChat(t, "", "", "")
+}
+
+func newEnvWithChat(t *testing.T, wsURL, appID, appKey string) *env {
 	t.Helper()
 	e := &env{chats: newFakeChats(), quota: &fakeQuota{allowed: true}}
 	biz := fakeBusinesses{
 		byslug: map[string]*business.Business{
-			"shop":  {ID: 1, OwnerID: 10, Slug: "shop", Name: "Shop", OnagentAppID: str("app-1"), OnagentAPIKey: str("key-1")},
-			"other": {ID: 2, OwnerID: 11, Slug: "other", Name: "Other", OnagentAppID: str("app-2"), OnagentAPIKey: str("key-2")},
+			"shop":  {ID: 1, OwnerID: 10, Slug: "shop", Name: "Shop"},
+			"other": {ID: 2, OwnerID: 11, Slug: "other", Name: "Other"},
 			"bare":  {ID: 3, OwnerID: 12, Slug: "bare", Name: "Bare"},
 		},
 		sections: map[int64][]business.Section{
@@ -154,7 +166,11 @@ func newEnv(t *testing.T) *env {
 			},
 		},
 	}
-	e.h = NewHandler(Config{Businesses: biz, Chats: e.chats, Quota: e.quota, OnagentWSURL: "wss://onagent.test/ws", Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	e.h = NewHandler(Config{
+		Businesses: biz, Chats: e.chats, Quota: e.quota,
+		OnagentWSURL: wsURL, OnagentAppID: appID, OnagentAppKey: appKey,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
 	e.mux = http.NewServeMux()
 	e.h.Register(e.mux)
 	return e
@@ -188,17 +204,29 @@ func TestGetBusiness(t *testing.T) {
 	var out map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	chat := out["chat"].(map[string]any)
-	if chat["available"] != true || chat["appId"] != "app-1" || chat["apiKey"] != "key-1" || chat["wsUrl"] != "wss://onagent.test/ws" {
+	if chat["available"] != true || chat["appId"] != "shared-app" || chat["apiKey"] != "shared-key" || chat["wsUrl"] != "wss://onagent.test/ws" {
 		t.Fatalf("chat info: %+v", chat)
 	}
 	// Nothing internal may leak.
-	for _, k := range []string{"ID", "OwnerID", "id", "ownerId", "OnagentAPIKey"} {
+	for _, k := range []string{"ID", "OwnerID", "id", "ownerId"} {
 		if _, ok := out[k]; ok {
 			t.Fatalf("leaked field %q", k)
 		}
 	}
 
-	rec = e.do("GET", "/public/businesses/bare", "")
+	// A different business gets the exact same shared app/key: there is no
+	// per-business provisioning anymore.
+	rec = e.do("GET", "/public/businesses/other", "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	chat = out["chat"].(map[string]any)
+	if chat["appId"] != "shared-app" || chat["apiKey"] != "shared-key" {
+		t.Fatalf("other business should share the same app: %+v", chat)
+	}
+
+	// When onagent isn't configured at all, chat is unavailable for every
+	// business alike.
+	e2 := newEnvNoOnagent(t)
+	rec = e2.do("GET", "/public/businesses/bare", "")
 	if rec.Code != 200 || strings.Contains(rec.Body.String(), "apiKey") || !strings.Contains(rec.Body.String(), `"available":false`) {
 		t.Fatalf("unprovisioned: %d %s", rec.Code, rec.Body.String())
 	}
@@ -287,6 +315,21 @@ func TestChatStoresMessageAndRecordsUsage(t *testing.T) {
 	}
 }
 
+// TestChatUnavailableWithoutOnagent covers what used to be the "bare
+// business has no onagent app" case: now onagent is configured once for the
+// whole server (ONAGENT_APP_ID/ONAGENT_APP_KEY/ONAGENT_WS_URL), so being
+// unconfigured affects every business identically, not one in particular.
+func TestChatUnavailableWithoutOnagent(t *testing.T) {
+	e := newEnvNoOnagent(t)
+	rec := e.do("POST", "/public/businesses/shop/chat", `{"content":"hi"}`)
+	if rec.Code != 503 || errCode(t, rec) != CodeUnavailable {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	if len(e.chats.msgs) != 0 || len(e.quota.records) != 0 {
+		t.Fatal("nothing should have been stored or billed")
+	}
+}
+
 func TestChatValidation(t *testing.T) {
 	e := newEnv(t)
 	cases := []struct {
@@ -300,7 +343,6 @@ func TestChatValidation(t *testing.T) {
 		{"too long", "shop", `{"content":"` + strings.Repeat("字", MaxMessageRunes+1) + `"}`, 400, CodeContentTooLong},
 		{"huge body", "shop", `{"content":"` + strings.Repeat("a", maxChatBody+10) + `"}`, 413, CodeContentTooLong},
 		{"no business", "nope", `{"content":"hi"}`, 404, CodeNotFound},
-		{"unprovisioned", "bare", `{"content":"hi"}`, 503, CodeUnavailable},
 		{"unknown conversation", "shop", `{"conversationId":"zzz","content":"hi"}`, 404, CodeConversationNotFound},
 	}
 	for _, c := range cases {

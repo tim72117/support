@@ -6,12 +6,16 @@ import { App } from './App.tsx'
 import { createFakeBackend, type FakeBackend } from './fakeBackend.ts'
 
 // The owner-settings flows in the console UI (list / create / edit content /
-// edit look / delete / sync), run against a fake of the backend's HTTP API
+// edit look / delete), run against a fake of the backend's HTTP API
 // (fakeBackend.ts) — the same paths, status codes and field names as the real
 // one. Nothing here is fake data inside the app itself.
+//
+// There is no "AI sync status" to exercise anymore: every business's
+// consumer page shares one onagent app configured once on the real backend,
+// so saving content never provisions or syncs anything per business.
 
-const BAKERY = { Slug: 'chenguang-bakery', Name: '晨光烘焙坊', Tagline: '天然酵母麵包', Mascot: 'bear', ThemeColor: '#FF8A5B', Connected: true }
-const STUDIO = { Slug: 'furry-studio', Name: '毛孩美容工作室', Tagline: '', Mascot: 'cat', ThemeColor: '#4ECDC4', Connected: false }
+const BAKERY = { Slug: 'chenguang-bakery', Name: '晨光烘焙坊', Tagline: '天然酵母麵包', Mascot: 'bear', ThemeColor: '#FF8A5B' }
+const STUDIO = { Slug: 'furry-studio', Name: '毛孩美容工作室', Tagline: '', Mascot: 'cat', ThemeColor: '#4ECDC4' }
 
 describe('console: owner settings against the backend API', () => {
   let fb: FakeBackend
@@ -44,13 +48,11 @@ describe('console: owner settings against the backend API', () => {
   // ---- list ---------------------------------------------------------------
 
   describe('list', () => {
-    it('shows what the backend returns, with public links and AI status', async () => {
+    it('shows what the backend returns, with public links', async () => {
       await openApp()
       expect(await screen.findByText('晨光烘焙坊')).toBeInTheDocument()
       expect(screen.getByText('/support/chenguang-bakery')).toBeInTheDocument()
       expect(screen.getByText('毛孩美容工作室')).toBeInTheDocument()
-      expect(screen.getByText('AI 小幫手已上線')).toBeInTheDocument()
-      expect(screen.getByText('尚未啟用')).toBeInTheDocument()
       expect(screen.getByText('尚未填寫服務簡介')).toBeInTheDocument()
       expect(fb.callsTo('GET', /^\/console\/businesses$/)).toHaveLength(1)
     })
@@ -266,43 +268,6 @@ describe('console: owner settings against the backend API', () => {
       expect(await screen.findByText('failed to save content')).toBeInTheDocument()
       expect(screen.getAllByPlaceholderText('在這裡輸入內容……')[0]).toHaveValue('重要內容')
       expect(screen.getByRole('button', { name: '儲存變更' })).toBeEnabled() // can try again
-    })
-  })
-
-  // ---- AI sync ------------------------------------------------------------
-
-  describe('AI sync status', () => {
-    async function saveSomething() {
-      const user = await openApp()
-      await openBusiness(user, '毛孩美容工作室')
-      await user.type((await screen.findAllByPlaceholderText('在這裡輸入內容……'))[0], '內容')
-      await user.click(screen.getByRole('button', { name: '儲存變更' }))
-      return user
-    }
-
-    it('confirms when the AI has the latest content', async () => {
-      fb.syncResult = 'ok'
-      await saveSomething()
-      expect(await screen.findByText(/AI 小幫手已經用到最新內容/)).toBeInTheDocument()
-    })
-
-    it('warns when the sync failed but the content was saved, and can re-sync', async () => {
-      fb.syncResult = 'failed'
-      const user = await saveSomething()
-      expect(await screen.findByText(/同步給 AI 小幫手失敗/)).toBeInTheDocument()
-      expect(fb.contents.get(fb.businesses[1].ID)?.Content).toContain('內容') // saved regardless
-
-      fb.syncResult = 'ok'
-      await user.click(screen.getByRole('button', { name: '重新同步' }))
-      await waitFor(() => expect(fb.callsTo('POST', /onagent-sync$/)).toHaveLength(1))
-      await waitFor(() => expect(screen.queryByText(/同步給 AI 小幫手失敗/)).not.toBeInTheDocument())
-      expect(await screen.findByText(/AI 小幫手已經用到最新內容/)).toBeInTheDocument()
-    })
-
-    it('says the AI service is not enabled yet when the server has no onagent configured', async () => {
-      fb.syncResult = 'disabled'
-      await saveSomething()
-      expect(await screen.findByText(/AI 對話服務目前還沒啟用/)).toBeInTheDocument()
     })
   })
 

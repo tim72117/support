@@ -1,9 +1,15 @@
 // Package business owns the businesses/business_content tables — one row
 // per consumer-facing support page a business owner has set up, and the
 // content their AI answers from. Everything about actually running the AI
-// (tool-calling, WebSocket sessions, inference) lives in onagent, not here;
-// this package only tracks what the business owner configured and, once
-// internal/onagentclient exists, which onagent app that maps to.
+// (tool-calling, WebSocket sessions, inference) lives in onagent, not here.
+//
+// Every business shares one fixed onagent app (ONAGENT_APP_ID/
+// ONAGENT_APP_KEY, read once at startup — see cmd/server/main.go and
+// internal/public) instead of each business having its own onagent app/key;
+// this package no longer stores or exposes a per-business app id or API
+// key. The businesses table still has onagent_app_id/onagent_api_key
+// columns (left in place rather than migrated away — see the handoff report
+// for why), but nothing here reads or writes them anymore.
 package business
 
 import (
@@ -63,27 +69,17 @@ type Business struct {
 	Mascot     string
 	ThemeColor string
 	Layout     string
-	// Connected is true once the business has an onagent app and key, i.e. its
-	// consumer page can actually chat. Derived, not stored.
-	Connected    bool
-	OnagentAppID *string
-	// OnagentAPIKey is never serialized by the owner-facing console API; it is
-	// only exposed (deliberately, it is a browser-side key) by the public
-	// consumer endpoint.
-	OnagentAPIKey *string `json:"-"`
 }
 
 type businessRow struct {
-	ID            int64   `gorm:"column:id;primaryKey"`
-	OwnerID       int64   `gorm:"column:owner_id"`
-	Slug          string  `gorm:"column:slug"`
-	Name          string  `gorm:"column:name"`
-	Tagline       string  `gorm:"column:tagline"`
-	Mascot        string  `gorm:"column:mascot"`
-	ThemeColor    string  `gorm:"column:theme_color"`
-	Layout        string  `gorm:"column:layout"`
-	OnagentAppID  *string `gorm:"column:onagent_app_id"`
-	OnagentAPIKey *string `gorm:"column:onagent_api_key"`
+	ID         int64  `gorm:"column:id;primaryKey"`
+	OwnerID    int64  `gorm:"column:owner_id"`
+	Slug       string `gorm:"column:slug"`
+	Name       string `gorm:"column:name"`
+	Tagline    string `gorm:"column:tagline"`
+	Mascot     string `gorm:"column:mascot"`
+	ThemeColor string `gorm:"column:theme_color"`
+	Layout     string `gorm:"column:layout"`
 }
 
 func (businessRow) TableName() string { return "businesses" }
@@ -92,8 +88,6 @@ func (r businessRow) toBusiness() *Business {
 	return &Business{
 		ID: r.ID, OwnerID: r.OwnerID, Slug: r.Slug, Name: r.Name,
 		Tagline: r.Tagline, Mascot: r.Mascot, ThemeColor: r.ThemeColor, Layout: r.Layout,
-		Connected:    r.OnagentAppID != nil && *r.OnagentAppID != "" && r.OnagentAPIKey != nil && *r.OnagentAPIKey != "",
-		OnagentAppID: r.OnagentAppID, OnagentAPIKey: r.OnagentAPIKey,
 	}
 }
 
@@ -271,9 +265,9 @@ func (s *Store) ListAll() ([]*Business, error) {
 }
 
 // Delete removes a business and its content (business_content cascades via
-// its foreign key). Does not touch anything on the onagent side — the
-// corresponding onagent app, if one was ever created, is left as-is; tearing
-// that down too is future onagentclient scope, not this skeleton's.
+// its foreign key). There is nothing to tear down on the onagent side: every
+// business shares the one fixed onagent app, so deleting a business does not
+// touch onagent at all.
 func (s *Store) Delete(id int64) error {
 	return s.db.Where("id = ?", id).Delete(&businessRow{}).Error
 }
@@ -413,18 +407,6 @@ func parseSections(raw json.RawMessage) ([]Section, error) {
 	return out, nil
 }
 
-// SetOnagentApp records which onagent app this business maps to, once
-// internal/onagentclient has created one. Not called anywhere yet in this
-// skeleton (SetOnagentAppID/SetOnagentKey are used instead, step by step).
-func (s *Store) SetOnagentApp(businessID int64, appID, apiKey string) error {
-	res := s.db.Model(&businessRow{}).Where("id = ?", businessID).
-		Updates(map[string]any{"onagent_app_id": appID, "onagent_api_key": apiKey})
-	if res.Error != nil {
-		return fmt.Errorf("business: set onagent app: %w", res.Error)
-	}
-	return nil
-}
-
 // GetBySlug looks up a business by its public slug (gorm.ErrRecordNotFound if
 // there is none).
 func (s *Store) GetBySlug(slug string) (*Business, error) {
@@ -433,22 +415,4 @@ func (s *Store) GetBySlug(slug string) (*Business, error) {
 		return nil, err
 	}
 	return row.toBusiness(), nil
-}
-
-// SetOnagentAppID records the onagent app created for this business before
-// its key is issued, so a half-finished provisioning can resume instead of
-// creating a second app.
-func (s *Store) SetOnagentAppID(businessID int64, appID string) error {
-	if err := s.db.Model(&businessRow{}).Where("id = ?", businessID).Update("onagent_app_id", appID).Error; err != nil {
-		return fmt.Errorf("business: set onagent app id: %w", err)
-	}
-	return nil
-}
-
-// SetOnagentKey records the app's API key.
-func (s *Store) SetOnagentKey(businessID int64, apiKey string) error {
-	if err := s.db.Model(&businessRow{}).Where("id = ?", businessID).Update("onagent_api_key", apiKey).Error; err != nil {
-		return fmt.Errorf("business: set onagent key: %w", err)
-	}
-	return nil
 }

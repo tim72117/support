@@ -9,7 +9,6 @@
 package console
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -22,7 +21,6 @@ import (
 
 	"github.com/tim72117/ai-support/internal/business"
 	"github.com/tim72117/ai-support/internal/conversation"
-	"github.com/tim72117/ai-support/internal/onagentclient"
 	"github.com/tim72117/ai-support/internal/quota"
 	"github.com/tim72117/ai-support/internal/session"
 )
@@ -33,25 +31,22 @@ type Handler struct {
 	// Quota may be nil (QUOTA_ENABLED=false); GET /console/quota then
 	// reports enabled=false instead of failing.
 	Quota *quota.Service
-	// Onagent and Chats are optional, set directly after NewHandler (same
-	// convention as onagent's console Handler.Events). A nil/disabled Onagent
-	// means businesses are saved but never provisioned on onagent; a nil Chats
-	// makes the conversation-reading routes answer 503.
-	Onagent *onagentclient.Client
-	Chats   *conversation.Store
-	log     *slog.Logger
+	// Chats is optional, set directly after NewHandler (same convention as
+	// onagent's console Handler.Events). A nil Chats makes the
+	// conversation-reading routes answer 503.
+	Chats *conversation.Store
+	log   *slog.Logger
 }
 
-// MaxContentRunes caps the owner-written content (it is sent to onagent as
-// part of every prompt's system context).
-const MaxContentRunes = onagentclient.MaxContentRunes
-
-// Values of the "onagentSync" field in create/save/sync responses.
-const (
-	syncOK       = "ok"
-	syncFailed   = "failed"   // saved here, onagent push failed; retry with POST .../onagent-sync
-	syncDisabled = "disabled" // onagent integration not configured on this server
-)
+// MaxContentRunes caps the owner-written content. All businesses share one
+// fixed onagent app now (see ONAGENT_APP_ID/ONAGENT_APP_KEY in
+// cmd/server/main.go), so this backend never pushes content into onagent at
+// all; content is only ever read back on demand through the
+// list_sections/read_section tools (see backend/internal/public and
+// backend/onagent-tools/*.yaml). The cap still exists because that content
+// is read by an LLM on every tool call, so an unbounded value would still be
+// an unbounded per-message cost.
+const MaxContentRunes = 20000
 
 func NewHandler(businesses *business.Store, sessionStore *session.Store, quotaSvc *quota.Service, log *slog.Logger) *Handler {
 	return &Handler{Businesses: businesses, Session: sessionStore, Quota: quotaSvc, log: log}
@@ -73,7 +68,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /console/businesses/{id}/content", h.withOwnedBusiness(h.getContent))
 	mux.HandleFunc("PUT /console/businesses/{id}/content", h.withOwnedBusiness(h.putContent))
-	mux.HandleFunc("POST /console/businesses/{id}/onagent-sync", h.withOwnedBusiness(h.syncBusiness))
 
 	mux.HandleFunc("GET /console/businesses/{id}/conversations", h.withOwnedBusiness(h.listConversations))
 	mux.HandleFunc("GET /console/businesses/{id}/conversations/{cid}", h.withOwnedBusiness(h.getConversation))
@@ -201,18 +195,11 @@ func (h *Handler) createBusiness(w http.ResponseWriter, r *http.Request, user *s
 		http.Error(w, "failed to create business", http.StatusInternalServerError)
 		return
 	}
-	// The business row is already saved; provisioning its onagent app is
-	// best-effort so a flaky/unconfigured onagent never loses the owner's
-	// input. On failure it can be retried (POST .../onagent-sync, or any
-	// later content save).
-	status := h.syncOnagent(r.Context(), b)
-	if fresh, err := h.Businesses.Get(b.ID); err == nil {
-		b = fresh
-	}
-	writeJSON(w, struct {
-		*business.Business
-		OnagentSync string `json:"onagentSync"`
-	}{b, status})
+	// Nothing is provisioned on onagent here: every business shares the same
+	// fixed onagent app (ONAGENT_APP_ID/ONAGENT_APP_KEY, read once at startup
+	// in cmd/server/main.go, never stored per-business) — there is no
+	// per-business app/key to create or sync.
+	writeJSON(w, b)
 }
 
 func (h *Handler) getBusiness(w http.ResponseWriter, r *http.Request, user *session.User, b *business.Business) {
@@ -296,79 +283,7 @@ func (h *Handler) putContent(w http.ResponseWriter, r *http.Request, user *sessi
 		http.Error(w, "failed to save content", http.StatusInternalServerError)
 		return
 	}
-	// Saved; pushing to onagent is best-effort (see createBusiness). The
-	// outcome travels in a header so the success status stays 204.
-	w.Header().Set("X-Onagent-Sync", h.syncOnagent(r.Context(), b))
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// syncBusiness retries provisioning/pushing for one business.
-func (h *Handler) syncBusiness(w http.ResponseWriter, r *http.Request, user *session.User, b *business.Business) {
-	switch status := h.syncOnagent(r.Context(), b); status {
-	case syncDisabled:
-		http.Error(w, "onagent integration is not configured", http.StatusServiceUnavailable)
-	case syncFailed:
-		http.Error(w, "could not sync with onagent, try again later", http.StatusBadGateway)
-	default:
-		writeJSON(w, map[string]string{"onagentSync": status})
-	}
-}
-
-// syncOnagent brings onagent in line with this business: creates the app and
-// issues its key if not done yet (each step is stored as soon as it succeeds,
-// so a half-finished run resumes instead of duplicating), re-binds the allowed
-// origins, and pushes the current content. Never returns an error: failures
-// are logged (without tokens, keys or content) and reported as syncFailed.
-func (h *Handler) syncOnagent(ctx context.Context, b *business.Business) string {
-	if !h.Onagent.Enabled() {
-		return syncDisabled
-	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
-	// Re-read: the caller's copy may predate an earlier partial provisioning.
-	cur, err := h.Businesses.Get(b.ID)
-	if err != nil {
-		h.log.Error("onagent sync: load business", "business", b.ID, "err", err)
-		return syncFailed
-	}
-	fail := func(step string, err error) string {
-		h.log.Error("onagent sync failed", "business", b.ID, "step", step, "err", err)
-		return syncFailed
-	}
-
-	appID := ""
-	if cur.OnagentAppID != nil {
-		appID = *cur.OnagentAppID
-	}
-	if appID == "" {
-		appID = h.Onagent.NewAppID(cur.Slug)
-		if err := h.Onagent.CreateApp(ctx, appID); err != nil {
-			return fail("create app", err)
-		}
-		if err := h.Businesses.SetOnagentAppID(cur.ID, appID); err != nil {
-			return fail("store app id", err)
-		}
-	}
-	if cur.OnagentAPIKey == nil || *cur.OnagentAPIKey == "" {
-		key, err := h.Onagent.IssueKey(ctx, appID)
-		if err != nil {
-			return fail("issue key", err)
-		}
-		if err := h.Businesses.SetOnagentKey(cur.ID, key); err != nil {
-			return fail("store key", err)
-		}
-	}
-	if err := h.Onagent.SetOrigins(ctx, appID); err != nil {
-		return fail("set origins", err)
-	}
-	content, err := h.Businesses.GetContent(cur.ID)
-	if err != nil {
-		return fail("load content", err)
-	}
-	if err := h.Onagent.PushContent(ctx, appID, cur.Name, content); err != nil {
-		return fail("push content", err)
-	}
-	return syncOK
 }
 
 func (h *Handler) listConversations(w http.ResponseWriter, r *http.Request, user *session.User, b *business.Business) {

@@ -1,8 +1,13 @@
 // A stand-in for the ai-support backend, for tests only. It sits at the
 // network boundary (a replacement for `fetch`) and speaks the real API
 // contract of backend/internal/console — same paths, same status codes, same
-// capitalised JSON field names, same X-Onagent-Sync header — so the console
-// code under test is exercised exactly as it will run against the real thing.
+// capitalised JSON field names — so the console code under test is
+// exercised exactly as it will run against the real thing.
+//
+// There is no per-business "connected to onagent" status or sync endpoint
+// to fake anymore: every business's consumer page shares one fixed onagent
+// app configured once on the real backend (ONAGENT_APP_ID/ONAGENT_APP_KEY),
+// so the console never provisions or syncs anything per business.
 
 interface Biz {
   ID: number
@@ -13,7 +18,6 @@ interface Biz {
   Mascot: string
   ThemeColor: string
   Layout: string
-  Connected: boolean
 }
 
 interface FakeMessage {
@@ -42,8 +46,6 @@ export interface FakeBackend {
   calls: Call[]
   businesses: Biz[]
   contents: Map<number, { Content: string; Sections: unknown }>
-  /** What the next content save / sync should report. */
-  syncResult: 'ok' | 'failed' | 'disabled'
   /** Make requests whose "METHOD path" matches fail with this status. */
   failNext: (key: string, status: number, message?: string) => void
   /** Fail every request as if the network were down. */
@@ -74,7 +76,6 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
     calls: [],
     businesses: [],
     contents: new Map(),
-    syncResult: 'ok',
     offline: false,
     conversations: [],
     messages: [],
@@ -132,11 +133,10 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
           Mascot: body.mascot || 'fox',
           ThemeColor: body.themeColor || '#FF8A5B',
           Layout: body.layout || 'center',
-          Connected: fb.syncResult === 'ok',
         }
         fb.businesses.push(biz)
         fb.contents.set(biz.ID, { Content: '', Sections: null })
-        return res(200, { ...biz, onagentSync: fb.syncResult })
+        return res(200, biz)
       }
 
       // --- conversations ---
@@ -160,7 +160,7 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
         return res(404, '404 page not found')
       }
 
-      const m = path.match(/^\/console\/businesses\/(\d+)(\/content|\/onagent-sync)?$/)
+      const m = path.match(/^\/console\/businesses\/(\d+)(\/content)?$/)
       if (!m) return res(404, '404 page not found')
       const id = Number(m[1])
       const biz = fb.businesses.find((b) => b.ID === id)
@@ -190,14 +190,7 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
       if (sub === '/content' && method === 'GET') return res(200, fb.contents.get(id) ?? { Content: '', Sections: null })
       if (sub === '/content' && method === 'PUT') {
         fb.contents.set(id, { Content: body.content, Sections: body.sections ?? null })
-        if (fb.syncResult === 'ok') biz.Connected = true
-        return res(204, null, { 'X-Onagent-Sync': fb.syncResult })
-      }
-      if (sub === '/onagent-sync' && method === 'POST') {
-        if (fb.syncResult === 'disabled') return res(503, 'onagent integration is not configured')
-        if (fb.syncResult === 'failed') return res(502, 'could not sync with onagent, try again later')
-        biz.Connected = true
-        return res(200, { onagentSync: 'ok' })
+        return res(204, null)
       }
       return res(404, '404 page not found')
     },
@@ -213,7 +206,6 @@ export function createFakeBackend(opts: { email?: string | null; businesses?: Pa
       Mascot: 'fox',
       ThemeColor: '#FF8A5B',
       Layout: 'center',
-      Connected: false,
       ...b,
     })
     fb.contents.set(fb.businesses[fb.businesses.length - 1].ID, { Content: '', Sections: null })

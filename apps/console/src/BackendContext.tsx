@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, apiWithHeaders, ApiError } from './api.ts'
+import { api, ApiError } from './api.ts'
 import {
   buildContentText,
   sectionsForBackend,
@@ -22,9 +22,6 @@ interface Session {
   email: string
   ownerName: string
 }
-
-/** Result of pushing a business's content to the AI service (onagent). */
-export type SyncStatus = 'ok' | 'failed' | 'disabled' | 'unknown'
 
 export type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -50,8 +47,7 @@ interface Backend {
   updateBusiness: (id: number, patch: BusinessPatch) => Promise<Business>
   deleteBusiness: (id: number) => Promise<void>
   loadContent: (id: number) => Promise<ContentSection[]>
-  saveContent: (id: number, sections: ContentSection[]) => Promise<SyncStatus>
-  syncOnagent: (id: number) => Promise<SyncStatus>
+  saveContent: (id: number, sections: ContentSection[]) => Promise<void>
 
   loadConversations: (businessId: number) => Promise<{ state: ConversationsState; list: Conversation[]; error: string }>
   loadConversation: (businessId: number, conversationId: string) => Promise<ConversationDetail>
@@ -110,8 +106,6 @@ interface ApiBusiness {
   Mascot: string
   ThemeColor: string
   Layout: string
-  Connected: boolean
-  onagentSync?: string
 }
 
 const MASCOTS: MascotId[] = ['fox', 'bear', 'cat', 'bird', 'rabbit', 'dog', 'owl', 'penguin', 'panda', 'pig']
@@ -130,12 +124,7 @@ function toBusiness(b: ApiBusiness): Business {
     mascot: (MASCOTS as string[]).includes(b.Mascot) ? (b.Mascot as MascotId) : 'fox',
     themeColor: b.ThemeColor || '#FF8A5B',
     layout: (LAYOUTS as string[]).includes(b.Layout) ? (b.Layout as LayoutId) : 'center',
-    connected: !!b.Connected,
   }
-}
-
-function toSyncStatus(v: string | null | undefined): SyncStatus {
-  return v === 'ok' || v === 'failed' || v === 'disabled' ? v : 'unknown'
 }
 
 const BackendCtx = createContext<Backend | null>(null)
@@ -224,25 +213,10 @@ export function BackendProvider({ children }: { children: ReactNode }) {
         return sectionsFromBackend(res.Sections, res.Content ?? '')
       },
       saveContent: async (id, sections) => {
-        const { headers } = await apiWithHeaders<null>(`/console/businesses/${id}/content`, {
+        await api<null>(`/console/businesses/${id}/content`, {
           method: 'PUT',
           body: { content: buildContentText(sections), sections: sectionsForBackend(sections) },
         })
-        // Saving can create the AI app for the first time; reflect that.
-        const status = toSyncStatus(headers.get('X-Onagent-Sync'))
-        if (status === 'ok') setBusinesses((prev) => prev.map((b) => (b.id === id ? { ...b, connected: true } : b)))
-        return status
-      },
-      syncOnagent: async (id) => {
-        // 200 = synced, 503 = the AI service is not configured on this
-        // server, anything else (502, network) = failed, try again later.
-        try {
-          await api(`/console/businesses/${id}/onagent-sync`, { method: 'POST' })
-        } catch (err) {
-          return err instanceof ApiError && err.status === 503 ? 'disabled' : 'failed'
-        }
-        setBusinesses((prev) => prev.map((b) => (b.id === id ? { ...b, connected: true } : b)))
-        return 'ok'
       },
 
       loadConversations: async (businessId) => {

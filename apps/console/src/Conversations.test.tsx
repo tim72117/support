@@ -11,7 +11,7 @@ import { createFakeBackend, type FakeBackend } from './fakeBackend.ts'
 // GET .../conversations/{cid} — same paths, status codes and field names
 // (camelCase, per backend/internal/conversation's json tags) as the real one.
 
-const STUDIO = { Slug: 'furry-studio', Name: '毛孩美容工作室', Tagline: '', Mascot: 'cat', ThemeColor: '#4ECDC4', Connected: true }
+const STUDIO = { Slug: 'furry-studio', Name: '毛孩美容工作室', Tagline: '', Mascot: 'cat', ThemeColor: '#4ECDC4' }
 
 describe('console: conversation history tab', () => {
   let fb: FakeBackend

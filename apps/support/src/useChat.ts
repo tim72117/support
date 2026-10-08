@@ -79,22 +79,50 @@ export function useChat(business: PublicBusiness, greeting: string) {
   // browser — onagent's backend only relays the call over the WebSocket —
   // so the business's content never has to pass through onagent as a system
   // prompt; it's fetched from ai-support's own backend on demand, scoped by
-  // this page's slug exactly like every other /public/* call.
+  // a business slug exactly like every other /public/* call.
   //
-  // parseArgs intentionally returns {} / the sectionId with no further
+  // Every business's consumer page now shares the same onagent app (see
+  // backend/cmd/server/main.go's ONAGENT_APP_ID/ONAGENT_APP_KEY), so the
+  // app itself no longer identifies which business a tool call is about —
+  // the tool definitions require a businessSlug argument instead (see the
+  // YAML files). This page only ever serves one business (the one it was
+  // opened for), so businessSlug is validated against that page's own slug
+  // rather than trusted blindly: if the model ever passes a different slug
+  // (a bug, or a prompt-injection attempt from section content elsewhere),
+  // the call is rejected instead of silently fetching another business's
+  // data through this page's connection.
+  //
+  // parseArgs intentionally returns the sectionId with no further
   // validation beyond "is it a string": the backend endpoint is the source
   // of truth for whether an id exists, and a bad id just becomes a normal
   // 404 surfaced as a tool error, same as any other handler failure.
+  const requireOwnSlug = useCallback(
+    (raw: unknown): void => {
+      const businessSlug = (raw as { businessSlug?: unknown } | null)?.businessSlug
+      if (typeof businessSlug !== 'string' || !businessSlug) {
+        throw new Error('businessSlug is required')
+      }
+      if (businessSlug !== slug) {
+        throw new Error('businessSlug does not match this conversation')
+      }
+    },
+    [slug],
+  )
+
   const makeTools = useCallback(
     () => [
       defineTool(
         'list_sections',
-        () => ({}),
+        (raw: unknown) => {
+          requireOwnSlug(raw)
+          return {}
+        },
         () => fetchSections(slug),
       ),
       defineTool(
         'read_section',
         (raw: unknown) => {
+          requireOwnSlug(raw)
           const sectionId = (raw as { sectionId?: unknown } | null)?.sectionId
           if (typeof sectionId !== 'string' || !sectionId) {
             throw new Error('sectionId is required')
@@ -104,7 +132,7 @@ export function useChat(business: PublicBusiness, greeting: string) {
         ({ sectionId }) => fetchSection(slug, sectionId),
       ),
     ],
-    [slug],
+    [slug, requireOwnSlug],
   )
 
   const ensureBridge = useCallback((): AgentBridge => {

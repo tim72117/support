@@ -76,14 +76,6 @@ export function BusinessList({ onOpenBusiness }: BusinessListProps) {
                 </div>
               </div>
               <p className={styles.cardTagline}>{biz.tagline || '尚未填寫服務簡介'}</p>
-              <div className={styles.statusRow}>
-                <span
-                  className={`${styles.statusDot} ${biz.connected ? styles.statusDotOn : styles.statusDotOff}`}
-                />
-                <span className={styles.statusLabel}>
-                  {biz.connected ? 'AI 小幫手已上線' : '尚未啟用'}
-                </span>
-              </div>
             </button>
           ))}
         </div>

@@ -22,7 +22,6 @@ type bizFull struct {
 	Mascot     string
 	ThemeColor string
 	Layout     string
-	Connected  bool
 }
 
 func (c *client) createFull(slug string, extra map[string]string) (int, bizFull, string) {
@@ -44,9 +43,6 @@ func TestCreateBusinessWithLook(t *testing.T) {
 	code, b, raw := c.createFull(uniqueSlug(), map[string]string{"name": "  選民服務  ", "tagline": " 24 小時回覆 ", "mascot": "bear", "themeColor": "#4ECDC4", "layout": "split"})
 	if code != 200 || b.Name != "選民服務" || b.Tagline != "24 小時回覆" || b.Mascot != "bear" || b.ThemeColor != "#4ECDC4" || b.Layout != "split" {
 		t.Fatalf("create with look: %d %s", code, raw)
-	}
-	if b.Connected {
-		t.Error("a business with no onagent app is not connected")
 	}
 
 	// Defaults when the look is omitted.

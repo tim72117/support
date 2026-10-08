@@ -8,6 +8,10 @@
 # by requesting
 #   GET /public/businesses/{slug}/sections/{id}
 # from this ai-support backend (see backend/internal/public/public.go).
+#
+# businessSlug parameter: see list_sections.yaml's comment — every business
+# shares the same onagent app now, so the model must say which business's
+# slug it means on every call, not just the section id.
 name: read_section
 description: >-
   Read the full text of one content section this business owner has
@@ -20,6 +24,13 @@ description: >-
 parameters:
   type: object
   properties:
+    businessSlug:
+      type: string
+      description: >-
+        The slug of the business this conversation is about — the
+        /support/<slug> segment of the current page's URL. Always pass the
+        slug for the business you are currently helping; never guess or
+        reuse a slug from a different conversation.
     sectionId:
       type: string
       description: >-
@@ -27,5 +38,6 @@ parameters:
         list_sections (e.g. "hours", "contact", "products", "policy",
         "faq", "other").
   required:
+    - businessSlug
     - sectionId
 kind: query
