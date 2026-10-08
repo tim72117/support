@@ -18,6 +18,11 @@ export default defineConfig({
     strictPort: true, // 5173-5175 belong to other projects on this machine; fail loudly instead of drifting
   },
   test: {
+    // Tests must never depend on (or react to) a developer's own .env / .env.local: that is where
+    // local analytics is switched on, and it would leak into import.meta.env here.
+    env: { VITE_GA_ID: '', VITE_ANALYTICS_IN_DEV: '', VITE_DISABLE_ANALYTICS: '' },
+    // Some analytics tests run real Vite builds; give them room when the machine is busy.
+    testTimeout: 30_000,
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
   },

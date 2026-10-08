@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <!-- Google Analytics 4 (gtag.js)
+       Loads only when a GA4 measurement id is configured (VITE_GA_ID in
+       the app's .env; an unset variable is left as its literal token by
+       Vite, which the percent-sign check below treats as "not configured")
+       AND all of these hold:
+         - VITE_DISABLE_ANALYTICS is not "1" (hard off switch, always wins)
+         - Admin pages (any path under /admin) are never tracked
+         - this is not the Vite dev server, UNLESS VITE_ANALYTICS_IN_DEV is
+           "1" (set it in the git-ignored .env.local to test tracking
+           locally). In that case debug_mode is on, so the events show up in
+           GA's DebugView and can be excluded from the real reports with
+           the "Developer traffic" data filter.
+       Otherwise gtag.js is never even requested.
+       window.__gaEnabled tells the page scripts whether to send custom
+       events; they must check it and call gtag(), never touch dataLayer. -->
+  <script>
+    window.dataLayer = window.dataLayer || []
+    window.gtag = function () { window.dataLayer.push(arguments) }
+    window.__gaEnabled = false
+    ;(function () {
+      var id = '%VITE_GA_ID%'
+      if (!id || id.indexOf('%') !== -1) return
+      // Hard off switch: any non-empty value except 0 / false (an unset variable stays a literal%-token)
+      var off = '%VITE_DISABLE_ANALYTICS%'
+      if (off && off.indexOf('%') === -1 && off.toLowerCase() !== '0' && off.toLowerCase() !== 'false') return
+      // Admin pages are never tracked. Judge the normalised path so /Admin, //admin, /%61dmin,
+      // /admin%2Fx and /admin.html cannot slip through; an undecodable path counts as admin.
+      var path
+      try { path = decodeURIComponent(location.pathname) } catch (e) { return }
+      if (/^\/admin(\/|\.|$)/.test(path.toLowerCase().replace(/\/{2,}/g, '/'))) return
+      var dev = '%DEV%' === 'true'
+      if (dev && '%VITE_ANALYTICS_IN_DEV%' !== '1') return
+      window.__gaEnabled = true
+      var s = document.createElement('script')
+      s.async = true
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id)
+      document.head.appendChild(s)
+      window.gtag('js', new Date())
+      var cfg = {}
+      // Never report the query string or hash (they can carry tokens or dev parameters).
+      cfg.page_location = location.origin + location.pathname
+      if (dev) cfg.debug_mode = true
+      window.gtag('config', id, cfg)
+    })()
+  </script>
+  <!-- End Google Analytics -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>使用條款｜有問必答</title>
+  <link rel="stylesheet" href="./assets/base.css" />
+  <style>
+    .legal { max-width: 760px; padding-top: 24px; padding-bottom: 24px; }
+    .legal h1 { font-size: 1.8rem; }
+    .legal h2 { font-size: 1.15rem; margin-top: 1.8em; }
+    .legal ul { padding-left: 1.4em; margin: 0 0 1em; }
+    .legal li { margin-bottom: .4em; }
+    .legal .updated { color: var(--ink-dim); font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav"><a class="logo" href="./index.html">有問必答</a></nav>
+  </div>
+  <main class="wrap legal">
+    <h1>使用條款</h1>
+    <p class="updated">最後更新：2026 年 10 月 8 日</p>
+    <p>歡迎使用「有問必答」（以下稱「本服務」）。使用本服務即表示你同意以下條款，請詳讀。</p>
+
+    <h2>一、服務內容</h2>
+    <p>本服務讓業主建立 AI 對話替身，依業主提供的內容回覆訪客，並提供文案與頁面產生等功能。我們可能調整、新增或停止部分功能。</p>
+
+    <h2>二、帳號</h2>
+    <ul>
+      <li>你須提供正確的 Email，並妥善保管登入資訊；帳號下的一切行為視為你的行為。</li>
+      <li>你須年滿法定成年，或已取得法定代理人同意。</li>
+    </ul>
+
+    <h2>三、訂閱與付款</h2>
+    <ul>
+      <li>方案內容與價格以訂閱頁面顯示為準，付款由第三方金流 TapPay 處理。</li>
+      <li>除法令另有規定或訂閱頁面另有說明外，已開通之服務不提供退費。</li>
+      <li>你可隨時停止續訂，停止後服務使用至當期結束。</li>
+    </ul>
+
+    <h2>四、業主的責任</h2>
+    <ul>
+      <li>你須確保提供的內容（政見、政績、商品資訊等）真實、合法，並擁有使用權利。</li>
+      <li>你須在公開前審核 AI 替身的設定與內容，並對其對外發布的內容負責。</li>
+      <li>你須遵守適用法令。選舉用途請自行確認並遵守公職人員選舉罷免法等關於競選宣傳、AI 與資訊揭露的規範；店家用途須遵守消費者保護及廣告相關法令。</li>
+      <li>不得用於違法、詐欺、騷擾、散布不實資訊、侵害他人權利或規避平台安全機制的行為。</li>
+    </ul>
+
+    <h2>五、AI 內容的限制</h2>
+    <p>AI 的回答由模型依你提供的內容產生，可能有誤、不完整或不合時宜，我們不保證其正確性。本服務會在對話中標示「AI 替身」，你不得移除或誤導訪客其為真人。</p>
+
+    <h2>六、智慧財產權</h2>
+    <p>本服務的軟體、介面與商標歸我們所有。你提供的內容仍屬於你，你授權我們為提供服務所需而儲存、處理與顯示這些內容。</p>
+
+    <h2>七、服務變更與終止</h2>
+    <p>如你違反本條款，我們得暫停或終止你的帳號。你也可以隨時停止使用並要求刪除資料，詳見<a href="./privacy.html">隱私權政策</a>。</p>
+
+    <h2>八、免責與責任限制</h2>
+    <p>本服務依「現況」提供，我們不保證不中斷或無錯誤。在法律允許的範圍內，因使用或無法使用本服務所生之間接或衍生損害，我們不負賠償責任；我們的賠償責任以你於事故前 12 個月內實際支付的費用為上限。</p>
+
+    <h2>九、條款修改</h2>
+    <p>我們可能修改本條款，修改後公布於本頁；你於修改後繼續使用，視為同意。</p>
+
+    <h2>十、準據法與管轄</h2>
+    <p>本條款以中華民國法律為準據法；如有爭議，以臺灣臺北地方法院為第一審管轄法院，但法律另有強制規定者除外。</p>
+
+    <h2>十一、聯絡我們</h2>
+    <p>如有任何問題，請來信：<b>[請填入聯絡 Email]</b></p>
+  </main>
+  <footer class="footer"><div class="wrap">© 有問必答 ・ <a href="./privacy.html">隱私權政策</a> ・ <a href="./terms.html">使用條款</a> ・ <a href="./index.html">回到首頁</a></div></footer>
+</body>
+</html>

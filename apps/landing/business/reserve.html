@@ -1,6 +1,52 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
+  <!-- Google Analytics 4 (gtag.js)
+       Loads only when a GA4 measurement id is configured (VITE_GA_ID in
+       the app's .env; an unset variable is left as its literal token by
+       Vite, which the percent-sign check below treats as "not configured")
+       AND all of these hold:
+         - VITE_DISABLE_ANALYTICS is not "1" (hard off switch, always wins)
+         - Admin pages (any path under /admin) are never tracked
+         - this is not the Vite dev server, UNLESS VITE_ANALYTICS_IN_DEV is
+           "1" (set it in the git-ignored .env.local to test tracking
+           locally). In that case debug_mode is on, so the events show up in
+           GA's DebugView and can be excluded from the real reports with
+           the "Developer traffic" data filter.
+       Otherwise gtag.js is never even requested.
+       window.__gaEnabled tells the page scripts whether to send custom
+       events; they must check it and call gtag(), never touch dataLayer. -->
+  <script>
+    window.dataLayer = window.dataLayer || []
+    window.gtag = function () { window.dataLayer.push(arguments) }
+    window.__gaEnabled = false
+    ;(function () {
+      var id = '%VITE_GA_ID%'
+      if (!id || id.indexOf('%') !== -1) return
+      // Hard off switch: any non-empty value except 0 / false (an unset variable stays a literal%-token)
+      var off = '%VITE_DISABLE_ANALYTICS%'
+      if (off && off.indexOf('%') === -1 && off.toLowerCase() !== '0' && off.toLowerCase() !== 'false') return
+      // Admin pages are never tracked. Judge the normalised path so /Admin, //admin, /%61dmin,
+      // /admin%2Fx and /admin.html cannot slip through; an undecodable path counts as admin.
+      var path
+      try { path = decodeURIComponent(location.pathname) } catch (e) { return }
+      if (/^\/admin(\/|\.|$)/.test(path.toLowerCase().replace(/\/{2,}/g, '/'))) return
+      var dev = '%DEV%' === 'true'
+      if (dev && '%VITE_ANALYTICS_IN_DEV%' !== '1') return
+      window.__gaEnabled = true
+      var s = document.createElement('script')
+      s.async = true
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(id)
+      document.head.appendChild(s)
+      window.gtag('js', new Date())
+      var cfg = {}
+      // Never report the query string or hash (they can carry tokens or dev parameters).
+      cfg.page_location = location.origin + location.pathname
+      if (dev) cfg.debug_mode = true
+      window.gtag('config', id, cfg)
+    })()
+  </script>
+  <!-- End Google Analytics -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>預約諮詢｜有問必答 店家版</title>
@@ -25,7 +71,7 @@
   <div class="wrap">
     <nav class="nav">
       <a class="logo" href="../index.html">有問必答 <span class="badge-ai" style="margin-left:4px">店家版</span></a>
-      <div class="links"><a href="./subscribe.html">← 重新選擇方案</a><a class="btn ghost sm" data-console-link href="http://localhost:5177">登入</a></div>
+      <div class="links"><a href="./subscribe.html">← 重新選擇方案</a><a class="btn ghost sm" data-console-link href="/app/">登入</a></div>
     </nav>
   </div>
 
@@ -69,8 +115,8 @@
   <script>
     // 後端與管理後台的位址；開發時可用 ?api=...&console=... 覆寫，與其他頁面一致。
     const params = new URLSearchParams(location.search)
-    const API = (params.get('api') || 'http://localhost:8082').replace(/\/+$/, '')
-    const CONSOLE_URL = params.get('console') || 'http://localhost:5177'
+    const API = (params.get('api') || '').replace(/\/+$/, '')
+    const CONSOLE_URL = params.get('console') || '/app/'
 
     // 方案名稱僅供畫面顯示，需與 subscribe.html 的方案卡片一致。
     const PLAN_NAMES = {

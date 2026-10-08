@@ -7,14 +7,19 @@ const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)),
 const siteJs = read('../assets/site.js')
 
 // Loads a page and runs assets/site.js the way the browser would.
-function load(rel, search = '') {
+function load(rel, search = '', { loggedInAs = null } = {}) {
   const dom = new JSDOM(read(rel).replace(/<script[^>]*src=[^>]*><\/script>/g, ''), {
     runScripts: 'outside-only',
     url: 'http://localhost:5176/' + rel.replace('../', '') + search,
   })
+  // site.js asks the backend whether the visitor is logged in; jsdom has no fetch, so give it a fake one.
+  dom.window.fetch = async () =>
+    loggedInAs ? new Response(JSON.stringify({ ID: 1, Email: loggedInAs }), { status: 200 }) : new Response('not authenticated', { status: 401 })
   dom.window.eval(siteJs)
   return dom.window.document
 }
+
+const settle = () => new Promise((r) => setTimeout(r, 20))
 
 describe('login button in the page header', () => {
   for (const rel of ['../index.html', '../candidate/index.html', '../candidate/subscribe.html']) {
@@ -22,7 +27,7 @@ describe('login button in the page header', () => {
       const links = load(rel).querySelectorAll('[data-console-link]')
       expect(links).toHaveLength(1)
       expect(links[0].textContent.trim()).toBe('登入')
-      expect(links[0].href).toBe('http://localhost:5177/')
+      expect(links[0].href).toBe('http://localhost:5176/app/')
     })
   }
 
@@ -33,11 +38,36 @@ describe('login button in the page header', () => {
 
   it('the page itself keeps a sensible fallback href before the script runs', () => {
     const doc = new JSDOM(read('../index.html'), { runScripts: 'outside-only' }).window.document
-    expect(doc.querySelector('[data-console-link]').getAttribute('href')).toBe('http://localhost:5177')
+    expect(doc.querySelector('[data-console-link]').getAttribute('href')).toBe('/app/')
   })
 
   it('the ghost button keeps readable text (regression: white text on a transparent button)', () => {
     const css = read('../assets/base.css')
     expect(css).toMatch(/\.nav \.links a\.btn\.ghost\s*\{[^}]*color:\s*var\(--ink\)/)
+  })
+
+  it('shows 「登入」 while the visitor is logged out, 「進入管理後台」 once logged in', async () => {
+    const out = load('../index.html')
+    await settle()
+    expect(out.querySelector('[data-console-link]').textContent.trim()).toBe('登入')
+
+    const inn = load('../index.html', '', { loggedInAs: 'owner@example.com' })
+    await settle()
+    const link = inn.querySelector('[data-console-link]')
+    expect(link.textContent.trim()).toBe('進入管理後台')
+    expect(link.href).toBe('http://localhost:5176/app/')
+  })
+
+  it('the backend being unreachable leaves the plain login button alone', async () => {
+    const doc = new JSDOM(read('../index.html').replace(/<script[^>]*src=[^>]*><\/script>/g, ''), {
+      runScripts: 'outside-only',
+      url: 'http://localhost:5176/',
+    })
+    doc.window.fetch = async () => {
+      throw new TypeError('network down')
+    }
+    doc.window.eval(siteJs)
+    await settle()
+    expect(doc.window.document.querySelector('[data-console-link]').textContent.trim()).toBe('登入')
   })
 })

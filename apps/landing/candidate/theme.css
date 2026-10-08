@@ -17,3 +17,51 @@
 .badge-ai { display: inline-block; font-size: .72rem; padding: 1px 8px; border-radius: 999px; background: var(--accent-wash); color: #a86a00; font-weight: 700; }
 .trust { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; padding: 0; list-style: none; margin: 0; }
 .trust li { background: var(--bg-raised); border: 1px solid var(--border); padding: 8px 16px; border-radius: 999px; font-size: .9rem; }
+
+/* 首頁動態展示（demo.js）：固定高度，避免逐字播放時版面跳動 */
+.demo { max-width: 480px; }
+.demo-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.demo-tab { font-size: .75rem; padding: 2px 10px; border-radius: 999px; background: var(--bg-sunken); color: var(--ink-dim); transition: background .25s, color .25s; }
+.demo-tab.active { background: var(--brand); color: #fff; }
+.demo-log { height: 300px; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; }
+.demo-log::-webkit-scrollbar { display: none; }
+.demo-in { animation: demo-in .3s ease both; }
+@keyframes demo-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.demo-thinking { display: flex; gap: 4px; align-items: center; width: 56px; }
+.demo-thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); animation: demo-dot 1s infinite ease-in-out; }
+.demo-thinking i:nth-child(2) { animation-delay: .15s; }
+.demo-thinking i:nth-child(3) { animation-delay: .3s; }
+@keyframes demo-dot { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1.1); } }
+.demo-card { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; font-size: .85rem; background: var(--accent-wash); }
+.demo-card-icon { font-size: 1.1rem; }
+.demo-card b { display: block; font-size: .8rem; }
+.demo-card span:not(.demo-card-icon) { color: var(--ink-dim); }
+.demo-composer { display: flex; align-items: center; gap: 8px; margin-top: 10px; border: 1px solid var(--border); border-radius: 999px; padding: 6px 6px 6px 16px; background: var(--bg-sunken); }
+.demo-input { flex: 1; min-height: 1.4em; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demo-input:empty::before { content: '輸入問題…'; color: var(--ink-dim); opacity: .6; }
+.demo-send { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--border); color: #fff; font-size: .9rem; transition: background .2s; }
+.demo-send.on { background: var(--brand); }
+@media (prefers-reduced-motion: reduce) { .demo-in, .demo-thinking i { animation: none; } }
+
+/* 桌面版（≥1024px）：hero 改為左文右展示兩欄，展示放大並垂直置中；
+   手機與平板維持 base.css 的單欄版面不動。 */
+@media (min-width: 1024px) {
+  .hero { padding-bottom: 72px; }
+  .hero-body { max-width: none; padding: 56px 0 8px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(440px, 520px); gap: 64px; align-items: center; }
+  .hero-copy { min-width: 0; }
+  .hero .lead { max-width: 30em; }
+  .chat-mock.demo { max-width: none; width: 100%; margin-top: 0; padding: 22px; }
+  .demo-log { height: 360px; }
+  .demo-tabs { margin-bottom: 14px; }
+  .demo-composer { margin-top: 14px; }
+  section.block { padding: 72px 0; }
+  .section-title { margin-bottom: 44px; }
+  .grid { grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .steps { gap: 24px; }
+  .steps li { padding: 24px; }
+  .cta-band { padding: 64px 40px; }
+}
+
+/* 展示對話：選民（問題）在右、AI 替身在左 */
+.demo .bubble.q { margin-left: auto; }
+.demo .bubble.a { margin-left: 0; margin-right: auto; }

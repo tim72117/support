@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import styles from './BusinessEditor.module.css'
+import { trackPageView } from './analytics.ts'
 import { useBackend } from './BackendContext.tsx'
 import { ConversationsTab } from './ConversationsTab.tsx'
 import { Mascot } from './Mascot.tsx'
@@ -63,6 +64,11 @@ export function BusinessEditor({ businessId, onBack }: BusinessEditorProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+
+  // Each tab is its own virtual page (the URL does not change).
+  useEffect(() => {
+    trackPageView(`/businesses/edit/${tab}`, tab === 'content' ? '編輯內容' : '形象設定')
+  }, [tab])
 
   useEffect(() => {
     let cancelled = false

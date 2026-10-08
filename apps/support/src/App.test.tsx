@@ -299,4 +299,52 @@ describe('consumer chat page', () => {
     unmount()
     expect(bridges[0].closed).toBe(true)
   })
+
+  describe('analytics', () => {
+    let sent: unknown[][]
+    beforeEach(() => {
+      sent = []
+      // A production page where index.html enabled GA; gtag is replaced by a recorder.
+      vi.stubEnv('DEV', false)
+      Object.assign(window, { __gaEnabled: true, gtag: (...args: unknown[]) => sent.push(args) })
+    })
+    afterEach(() => {
+      vi.unstubAllEnvs()
+      delete (window as unknown as Record<string, unknown>).__gaEnabled
+      delete (window as unknown as Record<string, unknown>).gtag
+    })
+
+    it('reports the chat screen as its own page, and the chat events, with no visitor text', async () => {
+      const user = await openChat()
+      expect(sent).toEqual([
+        ['event', 'chat_start', { business: 'shop' }],
+        ['event', 'page_view', { page_path: '/support/shop/chat', page_title: '對話', page_location: `${window.location.origin}/support/shop/chat` }],
+      ])
+
+      handler = (url, init) => {
+        if (url.endsWith('/public/businesses/shop')) return json(BUSINESS)
+        if (url.endsWith('/chat') && init?.method === 'POST') return json({ conversationId: 'c1', messageId: 1, content: '我的電話是 0912345678' })
+        return apiError(404, 'not_found')
+      }
+      await user.type(screen.getByPlaceholderText('輸入訊息……'), '我的電話是 0912345678')
+      await user.click(screen.getByRole('button', { name: '送出' }))
+      await waitFor(() => expect(sent.some((c) => c[1] === 'chat_message')).toBe(true))
+      expect(sent.find((c) => c[1] === 'chat_message')).toEqual(['event', 'chat_message', { business: 'shop' }])
+      const wire = JSON.stringify(sent)
+      for (const secret of ['0912345678', 'c1', '晨光烘焙坊']) expect(wire).not.toContain(secret)
+    })
+
+    it('sends nothing while the page is only being looked at (the landing view is GA’s automatic page_view)', async () => {
+      render(<App />)
+      await screen.findByRole('button', { name: '開始對話' })
+      expect(sent).toEqual([])
+    })
+
+    it('sends nothing on an admin path, even after the chat is started', async () => {
+      window.history.pushState({}, '', '/admin/support/shop')
+      render(<App />)
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      expect(sent).toEqual([])
+    })
+  })
 })

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AgentBridge, defineTool } from '@onagent/bridge'
 import { ApiError, fetchSection, fetchSections, postChat, postReply, type ChatResult, type PublicBusiness } from './api.ts'
+import { trackEvent, trackPageView } from './analytics.ts'
 
 export interface ChatMessage {
   id: string
@@ -171,7 +172,9 @@ export function useChat(business: PublicBusiness, greeting: string) {
     startedRef.current = true
     setStarted(true)
     setMessages([{ id: `m${nextId.current++}`, role: 'assistant', text: greeting }])
-  }, [greeting])
+    trackEvent('chat_start', { business: slug })
+    trackPageView(`/support/${slug}/chat`, '對話') // the chat screen has no URL of its own
+  }, [greeting, slug])
 
   const send = useCallback(
     async (text: string) => {
@@ -207,6 +210,7 @@ export function useChat(business: PublicBusiness, greeting: string) {
       }
 
       conversationIdRef.current = result.conversationId
+      trackEvent('chat_message', { business: slug }) // never the text itself
       pendingRef.current = { conversationId: result.conversationId, messageId: result.messageId }
       timeoutRef.current = setTimeout(() => failTurn('等太久了，AI 沒有回覆，請再試一次。'), REPLY_TIMEOUT_MS)
       try {

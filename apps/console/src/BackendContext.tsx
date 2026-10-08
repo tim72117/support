@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, ApiError } from './api.ts'
+import { trackEvent, trackSignUp } from './analytics.ts'
 import {
   buildContentText,
   sectionsForBackend,
@@ -182,6 +183,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
       },
       register: async (email, password) => {
         setSession(toSession(await api<ApiUser>('/auth/register', { body: { email, password } })))
+        trackSignUp() // only reached once the account really exists
       },
       logout: async () => {
         // Clear locally even if the request fails: the user asked to leave.
@@ -197,6 +199,7 @@ export function BackendProvider({ children }: { children: ReactNode }) {
       createBusiness: async (input) => {
         const created = toBusiness(await api<ApiBusiness>('/console/businesses', { body: input }))
         setBusinesses((prev) => [...prev, created])
+        trackEvent('create_business')
         return created
       },
       updateBusiness: async (id, patch) => {

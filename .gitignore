@@ -34,3 +34,4 @@ npm-debug.log*
 # Local build artifacts
 *.exe
 .vite/
+.env.*.local

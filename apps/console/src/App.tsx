@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { trackPageView } from './analytics.ts'
 import { useBackend } from './BackendContext.tsx'
 import { Login } from './Login.tsx'
 import { AppShell } from './AppShell.tsx'
@@ -13,6 +14,14 @@ type View = { name: 'list' } | { name: 'business'; businessId: number }
 export function App() {
   const { session, loading } = useBackend()
   const [view, setView] = useState<View>({ name: 'list' })
+
+  // One virtual page view per screen (this app never changes the URL). The
+  // editor reports its own tabs, so only login and the list are handled here.
+  useEffect(() => {
+    if (loading) return
+    if (!session) trackPageView('/login', '登入')
+    else if (view.name === 'list') trackPageView('/businesses', '服務列表')
+  }, [loading, session, view.name])
 
   if (loading) {
     return null
